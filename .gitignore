@@ -1,0 +1,64 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 16 October 2026
+
+# ---- secrets: never commit ------------------------------------------------------------
+.env
+*.env
+!.env.example
+deploy/backup.env
+credentials/
+*service-account*.json
+*.pem
+*.key
+
+# ---- student data: real rosters and exports stay out of git ---------------------------
+*.xlsx
+*.xls
+*.csv
+!backend/examples/*.sample.csv
+backend/results/
+backend/data/
+*.db
+*.sqlite
+*.sqlite3
+*.dump
+backups/
+
+# ---- docs: only README.md files are committed ------------------------------------------
+*.md
+!README.md
+
+# ---- Python ----------------------------------------------------------------------------
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ---- frontend --------------------------------------------------------------------------
+node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.lighthouseci/
+*.tsbuildinfo
+npm-debug.log*
+
+# ---- logs and tool output --------------------------------------------------------------
+*.log
+loadtest/results/
+
+# ---- editors and OS --------------------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini

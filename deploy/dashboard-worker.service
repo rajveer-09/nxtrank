@@ -1,0 +1,29 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 15 October 2026
+# /etc/systemd/system/dashboard-worker.service
+# Exactly one worker: it discovers contests and runs the scans.
+[Unit]
+Description=NxtRank scan worker
+After=network-online.target postgresql.service dashboard-api.service
+Wants=network-online.target
+
+[Service]
+User=dashboard
+Group=dashboard
+WorkingDirectory=/srv/dashboard/backend
+EnvironmentFile=/srv/dashboard/backend/.env
+ExecStart=/srv/dashboard/backend/.venv/bin/python -m app.cli worker
+Restart=always
+RestartSec=10
+# A scan in progress is cancelled cleanly on SIGTERM; give it time to roll back.
+TimeoutStopSec=60
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/dashboard/backend
+
+[Install]
+WantedBy=multi-user.target

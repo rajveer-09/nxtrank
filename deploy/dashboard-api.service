@@ -1,0 +1,32 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 15 October 2026
+# /etc/systemd/system/dashboard-api.service
+[Unit]
+Description=NxtRank API (Gunicorn + Uvicorn)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+User=dashboard
+Group=dashboard
+WorkingDirectory=/srv/dashboard/backend
+EnvironmentFile=/srv/dashboard/backend/.env
+# Migrate once, before the workers start, so they don't race each other.
+ExecStartPre=/srv/dashboard/backend/.venv/bin/python -m app.cli init-db
+ExecStart=/srv/dashboard/backend/.venv/bin/gunicorn -c /srv/dashboard/deploy/gunicorn.conf.py "app.api.app:create_app()"
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=3
+KillMode=mixed
+TimeoutStopSec=30
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/srv/dashboard/backend
+
+[Install]
+WantedBy=multi-user.target

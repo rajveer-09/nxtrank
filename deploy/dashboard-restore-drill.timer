@@ -1,0 +1,14 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 16 October 2026
+# /etc/systemd/system/dashboard-restore-drill.timer
+[Unit]
+Description=NxtRank: monthly restore drill of the newest backup (monthly, 1st 4:30 am IST)
+
+[Timer]
+OnCalendar=*-*-01 23:00:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

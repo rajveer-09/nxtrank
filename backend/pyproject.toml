@@ -1,0 +1,38 @@
+[project]
+name = "contest-dashboard"
+version = "0.1.0"
+description = "NxtRank by NxtWave: LeetCode contest results, rankings and analytics (backend)"
+authors = [{ name = "Rajveer Sharma" }]
+maintainers = [{ name = "NxtWave" }]
+requires-python = ">=3.12"
+dependencies = [
+    "curl_cffi>=0.7",
+    "pydantic>=2.7",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "tzdata; sys_platform == 'win32'",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "itsdangerous>=2.2",
+    "openpyxl>=3.1",
+    "python-dotenv>=1.0",
+    "psycopg[binary]>=3.2",
+    "orjson>=3.10",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+sheets = ["google-auth[requests]>=2.20"]
+# Linux server (deploy/): process manager + Uvicorn worker class; uvloop/httptools come with uvicorn[standard]
+prod = ["gunicorn>=23", "uvicorn-worker>=0.3"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

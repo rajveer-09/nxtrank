@@ -1,0 +1,14 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 16 October 2026
+# /etc/systemd/system/dashboard-backup.timer
+[Unit]
+Description=NxtRank: nightly database backup (nightly, 3:00 am IST)
+
+[Timer]
+OnCalendar=*-*-* 21:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,55 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 15 October 2026
+# Caddy in front of the dashboard: HTTPS, static files and the /api proxy.
+# Caddy gets and renews the HTTPS certificate itself and speaks HTTP/2 and HTTP/3.
+# Replace the hostname with your domain (a free DuckDNS name works).
+
+dashboard.example.duckdns.org {
+	# API: proxied to Gunicorn on loopback; JSON compressed on the fly.
+	handle /api/* {
+		encode zstd gzip
+		reverse_proxy 127.0.0.1:8000 {
+			health_uri /api/health
+			health_interval 30s
+		}
+	}
+
+	# Frontend: static files from the build, served by Caddy.
+	handle {
+		root * /srv/dashboard/frontend/dist
+
+		# Hashed file names never change content: cache for a year.
+		@hashed path /assets/*
+		header @hashed Cache-Control "public, max-age=31536000, immutable"
+
+		# Everything else (index.html for every app route, favicon) is revalidated with
+		# its ETag, so a deploy is picked up at once. (Matched on the original path:
+		# Caddy sets headers before try_files rewrites it.)
+		@unhashed not path /assets/*
+		header @unhashed Cache-Control "no-cache"
+
+		# Single-page app: unknown paths get index.html.
+		try_files {path} /index.html
+
+		# The .br / .gz files written at build time, so nothing is compressed per request.
+		file_server {
+			precompressed br gzip
+		}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		-Server
+	}
+
+	log {
+		output file /var/log/caddy/dashboard.log {
+			roll_size 20MiB
+			roll_keep 5
+		}
+	}
+}

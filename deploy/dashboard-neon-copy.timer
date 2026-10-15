@@ -1,0 +1,14 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 16 October 2026
+# /etc/systemd/system/dashboard-neon-copy.timer
+[Unit]
+Description=NxtRank: weekly off-site copy of the database to Neon (weekly, Monday 4:00 am IST)
+
+[Timer]
+OnCalendar=Sun *-*-* 22:30:00 UTC
+Persistent=true
+RandomizedDelaySec=10min
+
+[Install]
+WantedBy=timers.target

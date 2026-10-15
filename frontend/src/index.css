@@ -1,0 +1,741 @@
+/**
+ * Author: Rajveer Sharma
+ * © NxtWave
+ * Date: 14 October 2026
+ */
+@import "tailwindcss";
+
+/* Design tokens. Dark is the default; light via <html data-theme="light">
+   (set before first paint by the script in index.html, toggled from the header). */
+:root {
+  color-scheme: dark;
+  --bg: #111315;
+  --nav: #17191c; /* header / navigation surfaces */
+  --surface: #1c1f23; /* cards, elevated surfaces */
+  --surface-2: #23272c; /* hover, table header, segmented controls */
+  --surface-3: #292d33; /* hover on surface-2 */
+  --popover: #202328; /* menus, tooltips */
+  --field: #15171a; /* inputs */
+  --border: #2a2e33;
+  --border-strong: #3a3f46;
+  --fg: #ffffff; /* overlay base: hairlines and hover washes are fg at low opacity */
+  --ink: #ececee;
+  --ink-2: #a1a6ae;
+  --ink-3: #7a8089;
+  --accent: #4f8cff;
+  --accent-hover: #6299ff;
+  --accent-ink: #7eaaff; /* accent as text */
+  --accent-ink-hover: #a5c3ff;
+  --accent-soft: rgb(79 140 255 / 0.14);
+  --bar-track: #2a2e33;
+  --skeleton-hi: #2c3036;
+  /* status: always paired with a text label */
+  --good: #3ecf8e;
+  --warning: #f2b544;
+  --serious: #f0875a;
+  --critical: #f2555a;
+  --neutral: #7c828b;
+  --good-ink: #7ee2b4;
+  --info: #a78bfa; /* violet: early (not yet final) results */
+  --info-ink: #c4b5fd;
+  --warning-ink: #f6cd7f;
+  --serious-ink: #f5ad8c;
+  --critical-ink: #f78d90;
+  --shadow: none;
+  --shadow-pop: 0 12px 32px rgb(0 0 0 / 0.45), 0 2px 6px rgb(0 0 0 / 0.3);
+  --card-ring: rgb(255 255 255 / 0.045);
+  --btn-bg: var(--surface-2);
+  --btn-bg-hover: var(--surface-3);
+  --btn-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --field-shadow: none;
+  --nav-track: rgb(255 255 255 / 0.035);
+  --nav-track-ring: rgb(255 255 255 / 0.05);
+  --pill-bg: var(--surface-2);
+  --pill-shadow: 0 1px 2px rgb(0 0 0 / 0.35), inset 0 0 0 1px rgb(255 255 255 / 0.07);
+  --page-glow: rgb(79 140 255 / 0.07);
+  --header-line: 0.6;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg: #f6f7f9;
+  --nav: #ffffff;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --surface-3: #e8ebf0;
+  --popover: #ffffff;
+  --field: #ffffff;
+  --border: #e3e6eb;
+  --border-strong: #cfd4dc;
+  --fg: #0b0d12;
+  --ink: #12151b;
+  --ink-2: #4a505b;
+  --ink-3: #737a86;
+  --accent: #3d7cf5;
+  --accent-hover: #2f6de6;
+  --accent-ink: #2563d9;
+  --accent-ink-hover: #1a4fb8;
+  --accent-soft: rgb(61 124 245 / 0.1);
+  --bar-track: #e7eaef;
+  --skeleton-hi: #f7f8fa;
+  --good: #1fae6c;
+  --warning: #e09a12;
+  --serious: #e0703f;
+  --critical: #dc3d43;
+  --neutral: #9aa0aa;
+  --good-ink: #127a4a;
+  --info: #7c3aed;
+  --info-ink: #5b21b6;
+  --warning-ink: #8f5d00;
+  --serious-ink: #a8481c;
+  --critical-ink: #b42329;
+  --shadow: 0 1px 2px rgb(16 24 40 / 0.05), 0 1px 3px rgb(16 24 40 / 0.04);
+  --shadow-pop: 0 12px 32px rgb(16 24 40 / 0.14), 0 2px 6px rgb(16 24 40 / 0.08);
+  --card-ring: rgb(16 24 40 / 0.07);
+  --btn-bg: #ffffff;
+  --btn-bg-hover: #f8f9fb;
+  --btn-shadow: 0 1px 2px rgb(16 24 40 / 0.06);
+  --field-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
+  --nav-track: #f1f3f6;
+  --nav-track-ring: rgb(16 24 40 / 0.05);
+  --pill-bg: #ffffff;
+  --pill-shadow: 0 1px 2px rgb(16 24 40 / 0.1), 0 0 0 1px rgb(16 24 40 / 0.06);
+  --page-glow: rgb(61 124 245 / 0.07);
+  --header-line: 0.35;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-nav: var(--nav);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-surface-3: var(--surface-3);
+  --color-popover: var(--popover);
+  --color-fg: var(--fg);
+  --color-field: var(--field);
+  --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-ink-hover: var(--accent-ink-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-bar-track: var(--bar-track);
+  --color-good: var(--good);
+  --color-warning: var(--warning);
+  --color-serious: var(--serious);
+  --color-critical: var(--critical);
+  --color-neutral: var(--neutral);
+  --color-good-ink: var(--good-ink);
+  --color-info: var(--info);
+  --color-info-ink: var(--info-ink);
+  --color-warning-ink: var(--warning-ink);
+  --color-serious-ink: var(--serious-ink);
+  --color-critical-ink: var(--critical-ink);
+  --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --shadow-card: var(--shadow);
+  --shadow-pop: var(--shadow-pop);
+}
+
+@layer base {
+  html {
+    background: radial-gradient(1100px 420px at 50% -160px, var(--page-glow), transparent 70%) no-repeat, var(--bg);
+  }
+  /* theme switch: colours cross-fade instead of snapping */
+  html.theme-transition,
+  html.theme-transition * {
+    transition: background-color 280ms ease, border-color 280ms ease, color 280ms ease, fill 280ms ease, stroke 280ms ease !important;
+  }
+  body {
+    background: transparent;
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.45;
+    font-feature-settings: "cv11", "ss01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+  ::selection {
+    background: rgb(79 140 255 / 0.35);
+  }
+  :focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* data tables: compact uppercase headers, hairline dividers, hover rows */
+  thead tr {
+    background: color-mix(in srgb, var(--fg) 2.5%, transparent);
+  }
+  th {
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    white-space: nowrap;
+  }
+  th button {
+    text-transform: inherit;
+    letter-spacing: inherit;
+    transition: color 150ms ease;
+  }
+  tbody tr {
+    transition: background-color 150ms ease;
+  }
+  td {
+    color: var(--ink);
+    font-size: 13px;
+  }
+
+  a,
+  button,
+  input,
+  select,
+  summary {
+    transition-property: color, background-color, border-color, box-shadow, opacity, transform;
+    transition-duration: 200ms;
+    transition-timing-function: cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  select {
+    appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%236c727b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.6rem center;
+    background-size: 12px;
+  }
+  select option {
+    background: var(--surface);
+    color: var(--ink);
+  }
+
+  details > summary {
+    list-style: none;
+  }
+  details > summary::-webkit-details-marker {
+    display: none;
+  }
+  details > summary::before {
+    content: "▸";
+    display: inline-block;
+    margin-right: 0.4rem;
+    font-size: 0.8em;
+    transition: transform 150ms ease;
+  }
+  details[open] > summary::before {
+    transform: rotate(90deg);
+  }
+
+  /* scrollbars */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border);
+    border: 2px solid var(--bg);
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--border-strong);
+  }
+}
+
+/* Scroll regions contain absolutely positioned descendants (e.g. screen-reader text in
+   links), so wide tables never widen the page. */
+.overflow-x-auto {
+  position: relative;
+}
+
+/* Wide tables: keep the first (identity) column in view while scrolling sideways */
+.sticky-first th:first-child,
+.sticky-first td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: inset -1px 0 0 color-mix(in srgb, var(--fg) 7%, transparent);
+}
+.sticky-first thead th:first-child {
+  background: color-mix(in srgb, var(--fg) 2.5%, var(--surface));
+}
+.sticky-first tbody tr:hover td:first-child {
+  background: color-mix(in srgb, var(--surface-2) 60%, var(--surface));
+}
+
+/* KPI rows: compact tiles; the first (lead) metric carries more weight */
+.kpi-row > .stat:first-child {
+  background: color-mix(in srgb, var(--accent) 6%, var(--surface));
+  box-shadow: inset 0 0 0 1px rgb(79 140 255 / 0.22);
+}
+.kpi-row > .stat:first-child .stat-value {
+  font-size: 26px;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- motion: subtle, quick, and off for reduced-motion users ---------------------- */
+@keyframes page-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes draw-line {
+  from { stroke-dashoffset: 1; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes grow-y {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+@keyframes grow-x {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+@keyframes sheen {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(250%); }
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* sliding nav highlights */
+.nav-pill-motion {
+  transition:
+    transform 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    width 280ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    opacity 200ms ease;
+  will-change: transform, width;
+}
+
+.page-enter {
+  animation: page-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.chart-line {
+  stroke-dasharray: 1;
+  animation: draw-line 700ms cubic-bezier(0.3, 0.7, 0.2, 1) both;
+}
+.chart-area {
+  animation: fade-in 600ms ease-out 150ms both;
+}
+.chart-bar {
+  transform-box: fill-box;
+  transform-origin: bottom;
+  animation: grow-y 450ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transition: fill 150ms ease, opacity 150ms ease;
+}
+.chart-tip {
+  animation: fade-in 120ms ease-out both;
+}
+.meter-fill {
+  transform-origin: left;
+  animation: grow-x 550ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+/* a light sheen travels across active progress bars */
+.progress-fill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 40%;
+  background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.35), transparent);
+  animation: sheen 1.6s ease-in-out infinite;
+}
+.skeleton {
+  display: block;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--skeleton-hi) 50%, var(--surface-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* search fields get a magnifier */
+input[type="search"] {
+  padding-left: 2rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='7' cy='7' r='4.5' fill='none' stroke='%237a8089' stroke-width='1.5'/%3E%3Cpath d='m10.5 10.5 3 3' stroke='%237a8089' stroke-width='1.5' stroke-linecap='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: 0.6rem center;
+  background-size: 14px;
+}
+input[type="search"]::-webkit-search-cancel-button {
+  filter: grayscale(1) brightness(1.4);
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .progress-fill::after {
+    display: none;
+  }
+}
+
+/* ---- header ------------------------------------------------------------------------ */
+.app-header {
+  background: color-mix(in srgb, var(--nav) 82%, transparent);
+  backdrop-filter: saturate(160%) blur(14px);
+  -webkit-backdrop-filter: saturate(160%) blur(14px);
+  border-bottom: 1px solid var(--border);
+}
+/* a soft accent hairline along the bottom edge */
+.app-header::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, color-mix(in srgb, var(--accent) 55%, transparent) 50%, transparent);
+  opacity: var(--header-line);
+  pointer-events: none;
+}
+.logo-tile {
+  background: #ffffff;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08), 0 1px 2px rgb(0 0 0 / 0.4);
+}
+:root[data-theme="light"] .logo-tile {
+  background: transparent;
+  box-shadow: none;
+  padding-left: 0;
+  padding-right: 0;
+}
+/* navigation: a segmented track with a raised active tab */
+.nav-track {
+  background: var(--nav-track);
+  box-shadow: inset 0 0 0 1px var(--nav-track-ring);
+}
+.nav-active-pill,
+.seg-active {
+  background: var(--pill-bg);
+  box-shadow: var(--pill-shadow);
+}
+.avatar {
+  background: linear-gradient(135deg, #4f8cff 0%, #6d63ff 55%, #9b5cff 100%);
+  text-shadow: 0 1px 1px rgb(0 0 0 / 0.2);
+}
+/* profile trigger: a ring that lights up on hover / while the menu is open */
+.avatar-trigger {
+  display: grid;
+  place-items: center;
+  box-shadow: 0 0 0 2px var(--nav), 0 0 0 3px var(--border);
+  transition: box-shadow 200ms cubic-bezier(0.2, 0.8, 0.2, 1), transform 200ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.avatar-trigger:hover,
+.avatar-trigger.is-open {
+  box-shadow: 0 0 0 2px var(--nav), 0 0 0 4px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.profile-head {
+  background:
+    radial-gradient(240px 120px at 0% 0%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%),
+    color-mix(in srgb, var(--fg) 2%, transparent);
+}
+.theme-icon {
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 200ms ease;
+}
+
+/* ---- click ripple ------------------------------------------------------------------- */
+.ripple {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+.ripple-wave {
+  position: absolute;
+  border-radius: 9999px;
+  background: currentColor;
+  opacity: 0.16;
+  transform: scale(0);
+  pointer-events: none;
+  z-index: -1;
+  animation: ripple-out 520ms cubic-bezier(0.2, 0.8, 0.2, 1) forwards;
+}
+@keyframes ripple-out {
+  to { transform: scale(1); opacity: 0; }
+}
+
+/* ---- popovers (dropdowns, menus) ----------------------------------------------------- */
+.popover {
+  transform-origin: top center;
+  animation: pop-in 160ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.popover[data-placement="top"] {
+  transform-origin: bottom center;
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+
+/* ---- upcoming contests ----------------------------------------------------------------- */
+@property --sweep {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+@keyframes sweep {
+  to { --sweep: 360deg; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes tick {
+  from { opacity: 0.25; transform: translateY(-3px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes live-ping {
+  0% { transform: scale(1); opacity: 0.7; }
+  80%, 100% { transform: scale(2.6); opacity: 0; }
+}
+.rise {
+  animation: rise 420ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+/* the next contest gets a slowly rotating accent border */
+.next-up {
+  position: relative;
+  isolation: isolate;
+}
+.next-up::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1px;
+  border-radius: inherit;
+  background: conic-gradient(from var(--sweep), transparent 0deg, var(--accent) 70deg, #8b6cff 130deg, transparent 200deg, transparent 360deg);
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  animation: sweep 4s linear infinite;
+  pointer-events: none;
+}
+/* status badges: a soft top highlight */
+.status-badge {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #fff 8%, transparent);
+}
+
+.count-unit-value {
+  animation: tick 300ms ease-out both;
+}
+.live-dot {
+  position: relative;
+}
+.live-dot::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  background: inherit;
+  animation: live-ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* ---- latest finished contest ------------------------------------------------------------ */
+.latest-row {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+.latest-row > td:first-child {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .next-up::before,
+  .live-dot::after {
+    animation: none;
+  }
+}
+
+/* ---- ETA chip ------------------------------------------------------------------------ */
+.eta-chip {
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 7%, transparent);
+}
+
+/* ---- consistency ring ------------------------------------------------------------------ */
+@keyframes ring-in {
+  from { stroke-dasharray: 0 100; }
+}
+.ring-arc {
+  animation: ring-in 700ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+/* ---- medals (toppers, college ranking) ---------------------------------------------- */
+.medal {
+  color: #3b2a05;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.55), inset 0 -1px 0 rgb(0 0 0 / 0.18), 0 1px 2px rgb(0 0 0 / 0.25);
+}
+.medal-gold { background: linear-gradient(145deg, #fde68a 0%, #f5c542 45%, #c99a12 100%); }
+.medal-silver { background: linear-gradient(145deg, #f1f5f9 0%, #cbd5e1 45%, #94a3b8 100%); color: #1e293b; }
+.medal-bronze { background: linear-gradient(145deg, #fcd5b0 0%, #d99560 45%, #a8612c 100%); color: #3a1d06; }
+.podium-gold { box-shadow: inset 0 0 0 1px rgb(245 197 66 / 0.35); background-image: linear-gradient(180deg, rgb(245 197 66 / 0.10), transparent 70%); }
+.podium-silver { box-shadow: inset 0 0 0 1px rgb(148 163 184 / 0.35); background-image: linear-gradient(180deg, rgb(148 163 184 / 0.10), transparent 70%); }
+.podium-bronze { box-shadow: inset 0 0 0 1px rgb(217 149 96 / 0.35); background-image: linear-gradient(180deg, rgb(217 149 96 / 0.10), transparent 70%); }
+
+/* avatar image: a soft ring like the initials avatar */
+.avatar-img { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.14), 0 1px 3px rgb(0 0 0 / 0.25); }
+
+/* dialog: fade the backdrop, lift the panel in */
+.dialog-backdrop { animation: dialog-fade 160ms ease-out; }
+.dialog-panel { animation: dialog-lift 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
+@keyframes dialog-fade { from { opacity: 0; } }
+@keyframes dialog-lift { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+@media (prefers-reduced-motion: reduce) { .dialog-backdrop, .dialog-panel { animation: none; } }
+
+/* ---- sign in / sign out ------------------------------------------------------------- */
+/* wrong password: a short, gentle shake */
+.shake { animation: shake 420ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both; }
+@keyframes shake {
+  10%, 90% { transform: translateX(-1px); }
+  20%, 80% { transform: translateX(2px); }
+  30%, 50%, 70% { transform: translateX(-4px); }
+  40%, 60% { transform: translateX(4px); }
+}
+
+/* signed in: the card lifts away, then the dashboard fades in */
+.login-exit { animation: login-exit 420ms 120ms cubic-bezier(0.4, 0, 0.2, 1) both; }
+@keyframes login-exit { to { opacity: 0; transform: translateY(-10px) scale(0.97); filter: blur(2px); } }
+.app-enter { animation: app-enter 380ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes app-enter { from { opacity: 0; transform: translateY(4px); } }
+
+/* signing out: the dashboard fades away */
+.app-leaving #root { transition: opacity 240ms ease, filter 240ms ease; opacity: 0; filter: blur(2px); }
+
+/* notices on the login card */
+.notice { animation: app-enter 300ms ease-out both; }
+
+/* a spinner inside buttons */
+.btn-spinner {
+  width: 14px; height: 14px; border-radius: 9999px;
+  border: 2px solid rgb(255 255 255 / 0.35); border-top-color: #fff;
+  animation: btn-spin 700ms linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+.tick-draw { stroke-dasharray: 16; stroke-dashoffset: 16; animation: tick-draw 300ms ease-out forwards; }
+@keyframes tick-draw { to { stroke-dashoffset: 0; } }
+
+/* start-up splash: appears only if loading takes a moment, so fast loads don't flash */
+.splash { animation: app-enter 300ms 180ms ease-out both; }
+.splash-bar { display: block; width: 120px; height: 2px; border-radius: 2px; overflow: hidden; background: var(--bar-track); position: relative; }
+.splash-bar::after { content: ""; position: absolute; inset: 0; width: 40%; background: var(--accent); border-radius: 2px; animation: splash-slide 1.1s ease-in-out infinite; }
+@keyframes splash-slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+
+/* browser autofill keeps our field colours instead of yellow / pale blue */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--ink);
+  -webkit-box-shadow: 0 0 0 1000px var(--field) inset;
+  caret-color: var(--ink);
+  transition: background-color 9999s ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shake, .login-exit, .app-enter, .notice, .splash, .tick-draw { animation: none; }
+  .tick-draw { stroke-dashoffset: 0; }
+  .splash-bar::after { animation: none; }
+  .app-leaving #root { transition: none; }
+}
+
+/* ---- login page (split screen) ------------------------------------------------------- */
+.login-shell { background: var(--bg); }
+/* left: a quiet panel with a fine grid that fades out towards the edges */
+.login-showcase {
+  background: var(--showcase-bg, #0c0e10);
+  border-right: 1px solid var(--border);
+}
+.login-showcase::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(255 255 255 / 0.035) 1px, transparent 1px);
+  background-size: 40px 40px;
+  mask-image: radial-gradient(ellipse 80% 70% at 30% 40%, #000 30%, transparent 75%);
+  pointer-events: none;
+}
+.login-showcase::after {
+  /* one soft highlight behind the product preview */
+  content: "";
+  position: absolute;
+  width: 520px;
+  height: 520px;
+  right: -140px;
+  bottom: -160px;
+  background: radial-gradient(circle, rgb(79 140 255 / 0.12), transparent 65%);
+  pointer-events: none;
+}
+:root[data-theme="light"] .login-showcase { --showcase-bg: #eef1f5; }
+:root[data-theme="light"] .login-showcase::before {
+  background-image:
+    linear-gradient(to right, rgb(16 24 40 / 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(16 24 40 / 0.05) 1px, transparent 1px);
+}
+:root[data-theme="light"] .login-showcase::after { background: radial-gradient(circle, rgb(61 124 245 / 0.1), transparent 65%); }
+
+/* fields: icon on the left, roomy, a clear focus ring */
+.login-field {
+  border-radius: 0.6rem;
+  background: var(--field);
+  box-shadow: inset 0 0 0 1px var(--border), var(--field-shadow, none);
+  transition: box-shadow 160ms ease, background-color 160ms ease;
+}
+.login-field:hover { box-shadow: inset 0 0 0 1px var(--border-strong), var(--field-shadow, none); }
+.login-field:focus-within { box-shadow: inset 0 0 0 1px var(--accent), 0 0 0 3px rgb(79 140 255 / 0.22); }
+.login-field.is-invalid { box-shadow: inset 0 0 0 1px rgb(242 85 90 / 0.6); }
+.login-input {
+  height: 100%;
+  width: 100%;
+  border-radius: inherit;
+  background: transparent;
+  padding-left: 2.6rem;
+  padding-right: 0.9rem;
+  font-size: 14px;
+  color: var(--ink);
+  outline: none;
+}
+.login-input::placeholder { color: var(--ink-3); }
+.login-input:disabled { opacity: 0.7; }
+.login-submit { border-radius: 0.6rem; }
+
+/* entrance: staggered rise; preview cards float in */
+.rise-2 { animation-delay: 80ms; }
+.rise-3 { animation-delay: 160ms; }
+.float-in { animation: float-in 700ms 200ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.float-in-2 { animation-delay: 380ms; }
+@keyframes float-in { from { opacity: 0; transform: translateY(16px) scale(0.98); } }
+.preview-card { transform-origin: left center; }
+.spark-draw { stroke-dasharray: 260; stroke-dashoffset: 260; animation: spark-draw 1.2s 700ms ease-out forwards; }
+@keyframes spark-draw { to { stroke-dashoffset: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .float-in, .spark-draw { animation: none; }
+  .spark-draw { stroke-dashoffset: 0; }
+}
+@media (max-height: 640px) { .login-foot { display: none; } }
+
+/* sections drawn after the first screen (components/Later.tsx): skip layout and paint
+   while far off screen; "auto" remembers the real size once it has been drawn */
+.later {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 480px;
+}

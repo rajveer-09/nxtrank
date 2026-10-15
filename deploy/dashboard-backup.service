@@ -1,0 +1,14 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 16 October 2026
+# /etc/systemd/system/dashboard-backup.service (run by dashboard-backup.timer)
+[Unit]
+Description=NxtRank: nightly database backup
+After=postgresql.service
+
+[Service]
+Type=oneshot
+User=dashboard
+Group=dashboard
+EnvironmentFile=-/srv/dashboard/deploy/backup.env
+ExecStart=/srv/dashboard/deploy/backup.sh
