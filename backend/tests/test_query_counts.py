@@ -131,7 +131,9 @@ def test_query_budget_is_met_and_does_not_grow_with_data(env, path):
     _, factory = env
     boss = _with_super(env)
     seed_one(factory, boss)
-    sid = boss.get("/api/students").json()["rows"][0]["id"]
+    # a student with results from the start (not "the first by name": name order depends on
+    # the database's collation, and a student without results skips one query)
+    sid = next(s["id"] for s in boss.get("/api/students", params={"q": "R1"}).json()["rows"] if s["roll_no"] == "R1")
     small = measure(boss, factory, sid)[path]
     grow(factory, boss)
     large = measure(boss, factory, sid)[path]
