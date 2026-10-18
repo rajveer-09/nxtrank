@@ -155,7 +155,7 @@ export function ChangesDialog({ uploadId, onClose }: { uploadId: number; onClose
       {detail.isPending ? (
         <RowsSkeleton />
       ) : detail.isError ? (
-        <ErrorBox error={detail.error} />
+        <ErrorBox error={detail.error} onRetry={() => detail.refetch()} />
       ) : (
         <div className="flex flex-col gap-3">
           <p className="text-xs text-ink-3">

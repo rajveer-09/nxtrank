@@ -227,7 +227,7 @@ def import_instructors(session: Session, rows: list[list[str]], *, actor: str, v
         records.append({"row": row_no, "key": email, "name": name, "action": "skipped", "reason": why})
     for row_no, raw in enumerate(rows[1:], start=2):
         cells = list(raw) + [""] * (len(rows[0]) - len(raw))
-        get = lambda f: cells[col[f]].strip() if col[f] is not None else ""  # noqa: E731
+        get = lambda f: cells[col[f]].strip() if col[f] is not None else ""  # noqa: E731, B023  (used in this iteration only)
         email, name = get("email").lower(), get("name")
         if not email and not name:
             continue

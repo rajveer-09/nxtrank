@@ -26,8 +26,11 @@ function spacers(items: VirtualItem[], total: number, offset: number) {
 export function useWindowRows(count: number, estimate: number, enabled = true): VirtualRows & { anchor: RefObject<HTMLTableSectionElement | null> } {
   const anchor = useRef<HTMLTableSectionElement>(null);
   const [margin, setMargin] = useState(0);
+  // every render, on purpose: filters above can wrap and move where the rows start;
+  // the 1px guard below stops it from updating in a loop
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useLayoutEffect(() => {
-    // where the rows start on the page (filters above can wrap and move it)
+    // where the rows start on the page
     const top = anchor.current ? anchor.current.getBoundingClientRect().top + window.scrollY : 0;
     if (Math.abs(top - margin) > 1) setMargin(top);
   });

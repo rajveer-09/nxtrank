@@ -28,7 +28,7 @@ export function GetResultsButton({ slug, status, isAdmin, compact, title }: { sl
   const m = useGetResults(slug);
   const [open, setOpen] = useState(false);
   const label = status.state === "failed" ? "Try again" : status.has_data ? "Rescan" : "Get results";
-  const allowed = me?.role !== "instructor" && (status.has_data ? isAdmin : true);
+  const allowed = me?.role !== "instructor" && me?.scans_enabled !== false && (status.has_data ? isAdmin : true);
   const busy = status.state === "scanning" || status.state === "queued";
   if (!allowed || busy || ["upcoming", "live", "scheduled"].includes(status.state)) return null;
   return (
@@ -321,9 +321,19 @@ export function StatusDetail({ status, worker }: { status: ContestStatus; worker
   }
 }
 
+/** Shown where scan buttons would be, on a copy of the data that doesn't scan (staging). */
+export function ScansOffNote() {
+  return (
+    <p className="rounded-md bg-fg/[0.03] px-3 py-2 text-[13px] text-ink-2 ring-1 ring-inset ring-fg/[0.06]">
+      Scans run on production. Reset staging from production for fresh data.
+    </p>
+  );
+}
+
 /** Big panel for a contest page that has no results yet. */
 export function NoResultsPanel({ slug, status, isAdmin, worker }: { slug: string; status: ContestStatus; isAdmin: boolean; worker?: WorkerStatus }) {
-  const readOnly = useMe().data?.role === "instructor";
+  const me = useMe().data;
+  const readOnly = me?.role === "instructor";
   const titles: Partial<Record<ContestStatus["state"], string>> = {
     scanning: "Collecting results…",
     queued: "Waiting in the scan queue",
@@ -355,6 +365,7 @@ export function NoResultsPanel({ slug, status, isAdmin, worker }: { slug: string
       {worker && !worker.alive && (status.state === "queued" || status.state === "scheduled") && (
         <ErrorBox error="The background worker isn't running, so nothing will be scanned until it starts (python -m app.cli worker)." />
       )}
+      {me?.scans_enabled === false && !readOnly && <ScansOffNote />}
       <div className="flex items-center gap-2">
         <GetResultsButton slug={slug} status={status} isAdmin={isAdmin} />
         {(status.state === "queued" || status.state === "scanning") && (

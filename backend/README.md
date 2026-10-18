@@ -42,6 +42,7 @@ automatically if present (on the server, systemd's `EnvironmentFile` supplies th
 .venv/Scripts/python -m app.cli scan weekly-contest-520 biweekly-contest-150   # scan + store
 .venv/Scripts/python -m app.cli export weekly-contest-520 --out results.csv --json results.json
 .venv/Scripts/python -m app.cli status                 # students, last sync, recent scans, upcoming contests
+.venv/Scripts/python -m app.cli clear-data --database-url "<database URL>"  # preview rows to be cleared
 .venv/Scripts/python -m app.cli sync-ratings           # LeetCode contest ratings (the worker does this after final scans)
 .venv/Scripts/python -m app.cli worker                 # automation: runs forever (see below)
 .venv/Scripts/python -m app.cli serve                  # dashboard (see below)
@@ -78,6 +79,12 @@ Reads the sheet (`--source` or `$ROSTER_SHEET_URL`) and updates the `students` t
 - rows without a roll number, or with a duplicate one, are skipped and reported with their sheet row number;
 - as a safety net, a sync that would deactivate more than half the active students is refused
   (usually the wrong tab or a renamed column). Use `--force` if it's intended.
+
+### `clear-data`
+
+`clear-data` previews removal of student and scan data from the explicitly selected database; it does not delete anything by default. It clears students, contest results and rating history, analytics summaries, instructor-to-student assignments, and scan requests/runs. Contest definitions are preserved, so they remain listed as not scanned. It also preserves login accounts, colleges, instructor-to-college assignments, and upload/roster audit history.
+
+Back up the database first and stop the worker so it cannot create new contest or scan records during the operation. Review the preview and database target, then run the same command with both `--execute` and `--confirm "DELETE STUDENT AND CONTEST DATA"` to proceed. The command requires `--database-url` every time and does not accept the app's implicit default target.
 
 ### `validate-handles`
 

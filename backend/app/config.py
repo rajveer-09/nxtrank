@@ -33,6 +33,19 @@ class Settings:
     secret_key: str | None  # signs session cookies; required in production
     cookie_secure: bool  # send the session cookie only over HTTPS
     frontend_dist: Path  # built frontend served by the API, if present
+    app_env: str = "development"  # development | staging | production (API docs are off in production)
+    allowed_origins: tuple[str, ...] = ()  # other sites allowed to send change requests (dev tools)
+    # worker: inside this daily window (display_tz) it checks every minute, since the database
+    # is kept awake then anyway; outside it, it sleeps until the next due job (at most 30 min)
+    # so Neon can suspend. "always" = check every minute all day.
+    worker_awake_window: str = "09:30-18:00"
+    worker_wake_url: str | None = None  # the website's /api/worker/wake, polled while asleep
+    scans_enabled: bool = True  # false on staging: its data is a copy, scans run on production
+    scan_review_enabled: bool = True  # scans requested from the dashboard wait for an admin's review
+
+    @property
+    def production(self) -> bool:
+        return self.app_env == "production"
 
 
 def _env(name: str) -> str | None:
@@ -54,4 +67,10 @@ def get_settings() -> Settings:
         secret_key=_env("SECRET_KEY"),
         cookie_secure=os.environ.get("COOKIE_SECURE", "false").lower() in ("1", "true", "yes"),
         frontend_dist=Path(os.environ.get("FRONTEND_DIST", BACKEND_DIR.parent / "frontend" / "dist")),
+        app_env=os.environ.get("APP_ENV", "development").strip().lower(),
+        worker_awake_window=os.environ.get("WORKER_AWAKE_WINDOW", "09:30-18:00"),
+        worker_wake_url=_env("WORKER_WAKE_URL"),
+        scans_enabled=os.environ.get("SCANS_ENABLED", "true").lower() not in ("0", "false", "no"),
+        scan_review_enabled=os.environ.get("SCAN_REVIEW_ENABLED", "true").lower() not in ("0", "false", "no"),
+        allowed_origins=tuple(o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "").split(",") if o.strip()),
     )

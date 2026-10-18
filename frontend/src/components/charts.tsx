@@ -187,6 +187,7 @@ export function LineChart({
             width={iw + 24}
             height={height}
             fill="transparent"
+            role="img"
             tabIndex={0}
             aria-label={`${ariaLabel}: use left and right arrow keys to read values`}
             className="cursor-crosshair outline-none focus-visible:stroke-accent"
@@ -293,6 +294,7 @@ export function ColumnChart({
                   width={band}
                   height={height - m.b}
                   fill="transparent"
+                  role="img"
                   tabIndex={0}
                   aria-label={`${c.label}: ${c.value != null ? format(c.value) : "no value"}${c.note ? `, ${c.note}` : ""}`}
                   className="outline-none"

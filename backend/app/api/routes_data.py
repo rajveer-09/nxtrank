@@ -17,10 +17,11 @@ from sqlalchemy.orm import Session
 from app.api.etag import conditional
 from app.api.fastjson import FastJSONRoute
 from app.api.deps import current_user, get_db, get_settings
+from app.api.errors import ApiError
 from app.config import Settings
 from app.db.models import College, Contest, Result, ScanRequest, ScanRun, Student, User, utcnow
-from app.services import analytics, dashboard, vcache
-from app.leetcode.client import LeetCodeClient, LeetCodeError
+from app.services import analytics, dashboard, drafts, rules, tags, topics, vcache, wake
+from app.leetcode.client import LeetCodeBlockedError, LeetCodeClient, LeetCodeError
 from app.services.instructors import get_instructor, student_ids_for
 from app.services.ratings import refresh_student_rating
 from app.services.scans import AUTO, kind_by_age
@@ -42,7 +43,7 @@ def _results(db: Session, slug: str):
     try:
         return load_contest_results(db, slug)
     except ContestNotScannedError:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no results for {slug}")
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"no results for {slug}") from None
 
 
 def _delay(settings: Settings) -> timedelta:
@@ -69,9 +70,17 @@ def scan_status_view(db: Session = Depends(get_db)) -> dict:
     return queue_status(db, datetime.now(timezone.utc))
 
 
-def _scope(db: Session, user: User, college: str | None, mine: bool) -> set[int] | None:
-    """Students a contest page is limited to: an instructor's own (`mine`), one college,
-    or everyone (None)."""
+def _scope(db: Session, user: User, college: str | None, mine: bool,
+           instructor_id: int | None = None) -> set[int] | None:
+    """Students a contest page is limited to: an instructor's own (`mine`), one
+    instructor's (`instructor_id`, admins), one college, or everyone (None)."""
+    if instructor_id is not None:
+        if user.role != "admin":
+            raise HTTPException(status.HTTP_403_FORBIDDEN, "only admins can choose an instructor")
+        target = get_instructor(db, instructor_id)
+        if target is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, "no such instructor")
+        return student_ids_for(db, target)
     if mine:
         if user.role != "instructor":
             raise HTTPException(status.HTTP_400_BAD_REQUEST, "only instructors have their own students")
@@ -83,13 +92,17 @@ def _scope(db: Session, user: User, college: str | None, mine: bool) -> set[int]
 
 
 @router.get("/contests/{slug}")
-def contest(slug: str, college: str | None = None, mine: bool = False, db: Session = Depends(get_db),
-            settings: Settings = Depends(get_settings), user: User = Depends(current_user)) -> dict:
-    ids = _scope(db, user, college, mine)
+def contest(slug: str, college: str | None = None, mine: bool = False, instructor_id: int | None = None,
+            db: Session = Depends(get_db), settings: Settings = Depends(get_settings),
+            user: User = Depends(current_user)) -> dict:
+    ids = _scope(db, user, college, mine, instructor_id)
     page = dashboard.contest_page(db, slug, now=datetime.now(timezone.utc), scan_delay=_delay(settings),
                                   final=Policy.from_settings(settings).final, student_ids=ids)
     if page is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"unknown contest {slug}")
+    # admins: a manual scan waiting for review (it doesn't count until they add it)
+    # (the status already says whether there is one, so no query when there isn't)
+    page["review"] = drafts.pending_for(db, slug) if user.role == "admin" and page["status"].get("in_review") else None
     return page
 
 
@@ -140,6 +153,7 @@ def request_contest_scan(slug: str, db: Session = Depends(get_db), user: User = 
     """Queue a scan of a finished contest. Admins and viewers can fetch a contest that has
     no results yet; rescanning one that has results is admin-only; instructors can't scan."""
     _no_instructors(user)
+    scans_allowed(settings)
     if not _SLUG.fullmatch(slug):
         raise HTTPException(422, "not a weekly/biweekly contest")
     now = datetime.now(timezone.utc)
@@ -154,6 +168,7 @@ def request_contest_scan(slug: str, db: Session = Depends(get_db), user: User = 
     if pending is None:
         db.add(ScanRequest(contest_slug=slug, kind=AUTO, requested_by=user.username))  # early/final by age
         db.commit()
+        wake.signal()
     queue = queue_status(db, now)
     item = next((x for x in queue["queue"] if x["slug"] == slug), None)
     if queue["running"] and queue["running"]["slug"] == slug:
@@ -188,9 +203,10 @@ def cancel_contest_scan(slug: str, db: Session = Depends(get_db), user: User = D
 
 @router.get("/contests/{slug}/results")
 def contest_results(request: Request, slug: str, college: str | None = None, mine: bool = False,
-                    db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+                    instructor_id: int | None = None, db: Session = Depends(get_db),
+                    user: User = Depends(current_user)) -> Response:
     def build(version):
-        ids = _scope(db, user, college, mine)
+        ids = _scope(db, user, college, mine, instructor_id)
 
         def everyone():
             stored = _results(db, slug)
@@ -231,7 +247,7 @@ def students(request: Request, q: str = "", college: str = "", handle: str = "",
             return dashboard.students_page(db, version=version, q=q, college=college, handle=handle,
                                            include_removed=include_removed, sort=sort, offset=offset, limit=limit)
         except ValueError as e:
-            raise HTTPException(422, str(e))
+            raise HTTPException(422, str(e)) from e
     return conditional(request, db, user, build)
 
 
@@ -244,6 +260,13 @@ def student(request: Request, student_id: int, db: Session = Depends(get_db),
             raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown student")
         return detail
     return conditional(request, db, user, build)
+
+
+def scans_allowed(settings: Settings) -> None:
+    """Staging runs on a copy of production's data; scanning there would only drift it."""
+    if not settings.scans_enabled:
+        raise ApiError(409, "Scans run on production. Reset staging from production for fresh data.",
+                       "scans_disabled")
 
 
 LIVE_RATING_EVERY = timedelta(minutes=10)  # one student page view asks LeetCode at most this often
@@ -260,14 +283,22 @@ async def refresh_rating(student_id: int, db: Session = Depends(get_db),
         raise HTTPException(422, "this student has no LeetCode handle")
     synced = st.ratings_synced_at
     fresh = synced is not None and datetime.now(timezone.utc) - as_utc(synced) < LIVE_RATING_EVERY
+    fresh = fresh or not settings.scans_enabled  # staging: show the copied rating, don't ask LeetCode
     if not fresh:
         try:
             async with LeetCodeClient(proxy=settings.proxy_url, max_retries=2, timeout=15) as client:
                 await refresh_student_rating(db, client, st)
+        except LeetCodeBlockedError as e:
+            db.rollback()
+            log.warning("live rating for %s blocked: %s", st.lc_slug, e)
+            raise ApiError(503, "LeetCode is blocking requests from the server right now. The rating shown "
+                                "is the last one saved; the worker refreshes ratings after each final scan.",
+                           "leetcode_blocked") from e
         except LeetCodeError as e:
             db.rollback()
             log.warning("live rating for %s failed: %s", st.lc_slug, e)
-            raise HTTPException(status.HTTP_502_BAD_GATEWAY, f"LeetCode didn't answer: {e}")
+            raise ApiError(502, "LeetCode didn't answer in time. The rating shown is the last one saved.",
+                           "upstream") from e
     return {"rating": round(st.lc_rating) if st.lc_rating is not None else None,
             "top_percentage": st.lc_top_percentage, "contests_attended": st.lc_contests_attended,
             "synced_at": dashboard.iso(st.ratings_synced_at), "fetched_now": not fresh}
@@ -308,7 +339,7 @@ def _students_page(db: Session, request: Request, version: str, student_ids: set
                                        student_ids=student_ids, search=q, sort=sort, desc=desc,
                                        offset=offset, limit=limit, version=version)
     except ValueError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
 
 
 @router.get("/analytics")
@@ -356,3 +387,53 @@ def instructor_analytics_students(request: Request, last: int | None = Query(Non
     return conditional(request, db, user, lambda version: _students_page(
         db, request, version, student_ids_for(db, target), last=last, college=college, q=q, sort=sort,
         desc=desc, offset=offset, limit=limit))
+
+
+# ---- topics (services/topics.py, services/tags.py) -----------------------------------------
+
+def _college_ids(db: Session, college: str | None) -> set[int] | None:
+    if not college:
+        return None
+    return set(db.scalars(select(Student.id).join(College, Student.college_id == College.id)
+                          .where(College.name == college)))
+
+
+def _both(a: set[int] | None, b: set[int] | None) -> set[int] | None:
+    return b if a is None else a if b is None else a & b
+
+
+@router.get("/analytics/topics")
+def analytics_topics(request: Request, last: int | None = Query(None, ge=1), college: str | None = None,
+                     db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    """Topic-wise stats for every active student (or one college), weakest topics, coverage."""
+    return conditional(request, db, user, lambda version: topics.group_topics(
+        db, last=last, student_ids=_college_ids(db, college), version=version))
+
+
+@router.get("/instructor/analytics/topics")
+def instructor_topics(request: Request, last: int | None = Query(None, ge=1), college: str | None = None,
+                      instructor_id: int | None = None, db: Session = Depends(get_db),
+                      user: User = Depends(current_user)) -> Response:
+    target = _instructor(db, user, instructor_id)
+    return conditional(request, db, user, lambda version: topics.group_topics(
+        db, last=last, student_ids=_both(student_ids_for(db, target), _college_ids(db, college)), version=version))
+
+
+@router.get("/students/{student_id}/topics")
+def student_topics(request: Request, student_id: int, last: int | None = Query(None, ge=1),
+                   db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    if db.get(Student, student_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "unknown student")
+    return conditional(request, db, user, lambda version: topics.student_topics(db, student_id, last=last))
+
+
+@router.get("/tags/status")
+def tags_status(db: Session = Depends(get_db)) -> dict:
+    """The last tag refresh, how many questions are in each state, and each question's tags."""
+    return tags.status_json(db)
+
+
+@router.get("/rules")
+def rule_book(settings: Settings = Depends(get_settings)) -> dict:
+    """The thresholds behind every number, for the Guide's rule book."""
+    return rules.rules(settings)

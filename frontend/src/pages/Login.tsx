@@ -5,7 +5,7 @@
  */
 import { useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from "react";
-import { ApiError, api } from "../api";
+import { ApiError, api, warmDatabase } from "../api";
 import { takeSignOutReason, type SignOutReason } from "../auth";
 import { Brand, ThemeToggle } from "../components/Layout";
 import { Button, ContestStateBadge, Medal, cx } from "../components/ui";
@@ -38,10 +38,9 @@ function friendly(err: unknown): string {
   return "Can't reach the server. Check your connection and try again.";
 }
 
-const NOTICE: Record<SignOutReason, string> = {
-  signed_out: "You've signed out.",
-  expired: "Your session expired. Sign in again to pick up where you left off.",
-};
+// after "Sign out" the user knows what happened: a toast that fades is enough
+const SIGNED_OUT_TOAST_MS = 2500;
+const EXPIRED_NOTE = "Your session ended. Sign in again to pick up where you left off.";
 
 type Phase = "idle" | "busy" | "success";
 
@@ -54,6 +53,14 @@ export default function Login() {
           <ThemeToggle />
         </div>
         <SignInForm />
+        <details className="mt-8 w-full max-w-[380px] text-[12px] text-ink-3">
+          <summary className="cursor-pointer hover:text-ink-2">About NxtRank</summary>
+          <p className="mt-1.5 leading-relaxed">
+            NxtRank shows NxtWave staff how students do in LeetCode's weekly and biweekly contests: results, rankings,
+            consistency and topic-wise analytics, collected automatically from LeetCode's public leaderboards. Logins are
+            set up by NxtRank admins.
+          </p>
+        </details>
         <p className="login-foot absolute inset-x-0 bottom-5 text-center text-[11px] text-ink-3">© NxtWave · NxtRank</p>
       </main>
     </div>
@@ -62,10 +69,29 @@ export default function Login() {
 
 // ---- the form ------------------------------------------------------------------------------
 
+/** "Signed out", at the bottom of the screen, fading away by itself. */
+function SignedOutToast() {
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    const t = window.setTimeout(() => setShown(false), SIGNED_OUT_TOAST_MS);
+    return () => window.clearTimeout(t);
+  }, []);
+  if (!shown) return null;
+  return (
+    <div role="status" aria-live="polite" className="toast fixed inset-x-0 bottom-12 z-50 mx-auto flex w-max items-center gap-2 rounded-full bg-surface-2 px-4 py-2 text-[13px] font-medium text-ink shadow-[var(--shadow-pop)] ring-1 ring-inset ring-[var(--card-ring)]">
+      <svg aria-hidden viewBox="0 0 16 16" className="h-3.5 w-3.5 text-good">
+        <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+      Signed out
+    </div>
+  );
+}
+
 function SignInForm() {
   const qc = useQueryClient();
-  const [notice] = useState(() => takeSignOutReason());
-  const [username, setUsername] = useState(remembered);
+  const [notice] = useState<SignOutReason | null>(() => takeSignOutReason());
+  // after signing out on purpose, the next person may be someone else: start empty
+  const [username, setUsername] = useState(() => (notice === "signed_out" ? "" : remembered()));
   const [password, setPassword] = useState("");
   const [show, setShow] = useState(false);
   const [caps, setCaps] = useState(false);
@@ -78,6 +104,7 @@ function SignInForm() {
 
   // returning user: their email is filled in, so start in the password box
   useEffect(() => {
+    warmDatabase(); // the database wakes while they type
     (username ? passRef : userRef).current?.focus();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -128,24 +155,15 @@ function SignInForm() {
         <p className="mt-1.5 text-sm text-ink-2">Welcome back. Use the email your admin set up for you.</p>
       </div>
 
-      {notice && !error && (
-        <div
-          role="status"
-          className={cx(
-            "notice mt-6 flex items-start gap-2 rounded-lg px-3 py-2.5 text-[13px] ring-1 ring-inset",
-            notice === "expired" ? "bg-warning/10 text-warning-ink ring-warning/25" : "bg-good/10 text-good-ink ring-good/25",
-          )}
-        >
-          <svg aria-hidden viewBox="0 0 16 16" className="mt-0.5 h-3.5 w-3.5 shrink-0">
-            {notice === "expired" ? (
-              <path d="M8 4.5V8l2 1.5M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            ) : (
-              <path d="m3.5 8.5 3 3 6-7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-            )}
+      {notice === "expired" && !error && (
+        <div role="status" className="notice mt-6 flex items-start gap-2 rounded-lg bg-accent-soft px-3 py-2.5 text-[13px] text-ink-2 ring-1 ring-inset ring-accent/20">
+          <svg aria-hidden viewBox="0 0 16 16" className="mt-0.5 h-3.5 w-3.5 shrink-0 text-accent-ink">
+            <path d="M8 4.5V8l2 1.5M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
-          {NOTICE[notice]}
+          {EXPIRED_NOTE}
         </div>
       )}
+      {notice === "signed_out" && <SignedOutToast />}
 
       <form key={shake} onSubmit={submit} noValidate aria-busy={busy} className={cx("mt-7 flex flex-col gap-5", shake ? "shake" : "rise rise-2")}>
         <Field label="Email" invalid={bad.user} icon={<path d="M2.5 4.5h11v7h-11zM2.5 4.5 8 9l5.5-4.5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />}>

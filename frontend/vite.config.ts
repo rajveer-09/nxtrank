@@ -56,7 +56,14 @@ function preloadFont(): Plugin {
 
 // Dev: `npm run dev` on :5173 proxies /api to the backend (`python -m app.cli serve`, :8000).
 // Prod: `npm run build` -> dist/ (hashed, pre-compressed assets), served by Caddy or the backend.
+const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf-8")) as { version: string };
+
 export default defineConfig({
+  // shown in the Guide's credits
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+    __BUILD_DATE__: JSON.stringify(new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })),
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -73,12 +80,13 @@ export default defineConfig({
       output: {
         // libraries change rarely: keep them in their own long-cached chunk
         manualChunks(id) {
-          if (/node_modules[\/](react|react-dom|scheduler|react-router|react-router-dom|@tanstack[\/](react-query|query-core))[\/]/.test(id)) return "vendor";
+          if (/node_modules[\\/](react|react-dom|scheduler|react-router|react-router-dom|@tanstack[\\/](react-query|query-core))[\\/]/.test(id)) return "vendor";
         },
       },
     },
   },
   server: {
-    proxy: { "/api": "http://127.0.0.1:8000" },
+    // keep the browser's Host: the API refuses change requests whose Origin isn't its own host
+    proxy: { "/api": { target: "http://127.0.0.1:8000", changeOrigin: false } },
   },
 });

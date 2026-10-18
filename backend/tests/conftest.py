@@ -57,6 +57,12 @@ class FakeClient:
     async def contest_info(self, slug):
         return self.info
 
+    async def question_tags(self, slug):
+        return []
+
+    async def community_topics(self, slug):
+        return []
+
     async def ranking_page(self, slug, page):
         self.requested.append(page)
         if page in self.fail:

@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent } from "react";
 import { adminsApi, type AdminUser } from "../api";
 import { AuditLine } from "./Roster";
-import { Badge, Button, Card, CardHeader, ConfirmDialog, Consequences, Empty, ErrorBox, FieldLabel, Input, cx } from "./ui";
+import { Badge, Button, Card, CardHeader, ConfirmDialog, Consequences, Empty, ErrorBox, FieldLabel, Modal, useFlash, Input, cx } from "./ui";
 import { RowsSkeleton } from "./skeletons";
 import { patchCache, type Undo } from "../optimistic";
 
@@ -16,6 +16,7 @@ export default function AdminsCard() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["admins"], queryFn: adminsApi.list });
   const [editing, setEditing] = useState<AdminUser | "new" | null>(null);
+  const [flashed, flash] = useFlash();
   const refresh = () => qc.invalidateQueries({ queryKey: ["admins"] });
 
   return (
@@ -29,31 +30,35 @@ export default function AdminsCard() {
           </Button>
         }
       />
-      {editing !== null && (
-        <AdminForm
-          key={editing === "new" ? "new" : editing.id}
-          admin={editing === "new" ? null : editing}
-          onDone={() => {
-            setEditing(null);
-            refresh();
-          }}
-          onCancel={() => setEditing(null)}
-        />
-      )}
+      {/* add / edit over the page where you clicked, not at the top of the list */}
+      <Modal open={editing !== null} onClose={() => setEditing(null)} label={editing === "new" ? "New admin" : "Edit admin"}>
+        {editing !== null && (
+          <AdminForm
+            key={editing === "new" ? "new" : editing.id}
+            admin={editing === "new" ? null : editing}
+            onDone={() => {
+              if (editing !== "new" && editing) flash(editing.id); // show which row changed
+              setEditing(null);
+              refresh();
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+      </Modal>
       {list.isPending ? (
         <div className="px-5">
           <RowsSkeleton />
         </div>
       ) : list.isError ? (
         <div className="p-5">
-          <ErrorBox error={list.error} />
+          <ErrorBox error={list.error} onRetry={() => list.refetch()} />
         </div>
       ) : list.data.length === 0 ? (
         <Empty>No admins.</Empty>
       ) : (
         <ul className="divide-y divide-fg/5 border-t border-fg/5">
           {list.data.map((a) => (
-            <AdminRow key={a.id} a={a} onEdit={() => setEditing(a)} onChanged={refresh} editing={editing !== null && editing !== "new" && editing.id === a.id} />
+            <AdminRow key={a.id} a={a} onEdit={() => setEditing(a)} onChanged={refresh} editing={editing !== null && editing !== "new" && editing.id === a.id} flashed={flashed === a.id} />
           ))}
         </ul>
       )}
@@ -69,7 +74,7 @@ function LockIcon() {
   );
 }
 
-function AdminRow({ a, onEdit, onChanged, editing }: { a: AdminUser; onEdit: () => void; onChanged: () => void; editing: boolean }) {
+function AdminRow({ a, onEdit, onChanged, editing, flashed }: { a: AdminUser; onEdit: () => void; onChanged: () => void; editing: boolean; flashed?: boolean }) {
   const qc = useQueryClient();
   const [confirm, setConfirm] = useState<"toggle" | "delete" | null>(null);
   const done = () => {
@@ -91,7 +96,7 @@ function AdminRow({ a, onEdit, onChanged, editing }: { a: AdminUser; onEdit: () 
   const err = toggle.error ?? remove.error;
 
   return (
-    <li className={cx("flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-4", editing && "bg-accent-soft/30", !a.active && "opacity-70")}>
+    <li className={cx("flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-4", editing && "bg-accent-soft/30", flashed && "row-flash", !a.active && "opacity-70")}>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[13px] font-semibold text-ink">{a.name}</span>
@@ -190,7 +195,7 @@ function AdminForm({ admin, onDone, onCancel }: { admin: AdminUser | null; onDon
     save.mutate();
   }
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 border-y border-fg/5 bg-fg/[0.015] px-5 py-4">
+    <form onSubmit={submit} className="flex flex-col gap-4 px-5 py-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-[13px] font-semibold text-ink">{admin ? `Edit ${admin.name}` : "New admin"}</h3>
         {admin && <AuditLine a={admin} className="text-right" />}

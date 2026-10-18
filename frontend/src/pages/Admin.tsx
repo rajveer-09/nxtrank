@@ -5,14 +5,17 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type FormEvent, type ReactNode } from "react";
-import { NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { adminsApi, api, collegesApi, instructorsApi, rosterApi } from "../api";
 import AdminsCard from "../components/Admins";
 import CollegesCard from "../components/Colleges";
 import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, cx } from "../components/ui";
 import { fmtIso, fmtInt } from "../format";
-import { CancelScanButton, ScanConfirm } from "../components/ContestStatus";
+import { CancelScanButton, ScanConfirm, ScansOffNote } from "../components/ContestStatus";
+import { useMe } from "../auth";
 import InstructorsCard from "../components/Instructors";
+import TagsCard from "../components/TagsAdmin";
+import InstructorDetail from "./InstructorDetail";
 import RosterCard from "../components/Roster";
 import { RowsSkeleton } from "../components/skeletons";
 
@@ -24,6 +27,8 @@ const RUN_STATUS = {
   failed: ["critical", "cross", "Failed"],
   cancelled: ["neutral", "dash", "Cancelled"],
   running: ["accent", "spin", "Running"],
+  review: ["info", "clock", "Awaiting review"],
+  discarded: ["neutral", "dash", "Discarded"],
 } as const;
 
 /** Admin: a settings-style page with a section menu; each section has its own URL. */
@@ -35,16 +40,18 @@ export default function Admin() {
         <h1 className="text-xl font-semibold tracking-tight text-ink">Admin</h1>
         <p className="mt-1 text-[13px] text-ink-2">Manage students and instructors, and run scans on demand.</p>
       </div>
-      <div className="grid items-start gap-6 lg:grid-cols-[216px_minmax(0,1fr)]">
+      <div className="grid items-start gap-6 lg:grid-cols-[256px_minmax(0,1fr)]">
         <AdminNav />
         <div key={pathname} className="page-enter min-w-0">
           <Routes>
             <Route index element={<Navigate to="/admin/students" replace />} />
             <Route path="students" element={<RosterCard />} />
             <Route path="instructors" element={<InstructorsCard />} />
+            <Route path="instructors/:id" element={<InstructorDetail />} />
             <Route path="admins" element={<AdminsCard />} />
             <Route path="colleges" element={<CollegesCard />} />
             <Route path="scans" element={<ScanCard />} />
+            <Route path="topics" element={<TagsCard />} />
             <Route path="*" element={<Navigate to="/admin/students" replace />} />
           </Routes>
         </div>
@@ -65,6 +72,9 @@ const ICONS: Record<string, ReactNode> = {
   ),
   colleges: (
     <path d="M2 6.5 8 3l6 3.5M3.5 7v5M6.5 7v5M9.5 7v5M12.5 7v5M2 13.5h12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  ),
+  topics: (
+    <path d="M2.5 3.5h5l6 6-4 4-6-6v-4ZM5.25 6.25h.01" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
   ),
   scans: (
     <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.6h2.6M8 5v3l2 1.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -111,21 +121,22 @@ function AdminNav() {
             </span>
           ) : undefined,
         },
+        { to: "topics", label: "Topics", hint: "Question tags, nightly refresh" },
       ],
     },
   ];
 
   return (
-    <nav aria-label="Admin sections" className="lg:sticky lg:top-24">
-      {/* phones and tablets: one row of tabs */}
-      <div className="flex gap-1 overflow-x-auto rounded-xl bg-fg/[0.03] p-1 ring-1 ring-inset ring-fg/[0.06] lg:hidden">
+    <nav aria-label="Admin sections" className="min-w-0 lg:sticky lg:top-24">
+      {/* phones and tablets: every section visible at once, two (or three) to a row */}
+      <div className="grid grid-cols-2 gap-1 rounded-xl bg-fg/[0.03] p-1 ring-1 ring-inset ring-fg/[0.06] sm:grid-cols-3 lg:hidden">
         {groups.flatMap((g) => g.items).map((it) => (
           <NavLink
             key={it.to}
             to={`/admin/${it.to}`}
             className={({ isActive }) =>
               cx(
-                "ripple flex shrink-0 items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
+                "ripple flex min-h-10 min-w-0 items-center gap-2 rounded-lg px-3 py-1.5 text-[13px] font-medium transition-colors",
                 isActive ? "bg-surface text-ink shadow-sm ring-1 ring-inset ring-fg/[0.08]" : "text-ink-2 hover:text-ink",
               )
             }
@@ -133,39 +144,54 @@ function AdminNav() {
             <svg aria-hidden viewBox="0 0 16 16" className="h-4 w-4">
               {ICONS[it.to]}
             </svg>
-            {it.label}
-            {it.count != null && <span className="tabular text-xs text-ink-3">{it.count}</span>}
+            <span className="truncate">{it.label}</span>
+            {it.count != null && <span className="tabular ml-auto text-xs text-ink-3">{it.count}</span>}
           </NavLink>
         ))}
       </div>
-      {/* desktop: a settings-style side menu */}
-      <div className="hidden flex-col gap-5 lg:flex">
-        {groups.map((g) => (
-          <div key={g.title}>
-            <div className="mb-1.5 px-3 text-[11px] font-medium uppercase tracking-wide text-ink-3">{g.title}</div>
-            <ul className="flex flex-col gap-0.5">
+      {/* desktop: a settings-style side menu on its own panel */}
+      <div className="admin-menu hidden flex-col gap-1 rounded-2xl bg-surface p-2 ring-1 ring-inset ring-fg/[0.07] lg:flex">
+        {groups.map((g, gi) => (
+          <div key={g.title} className={cx(gi > 0 && "border-t border-fg/[0.06] pt-1")}>
+            <div className="px-2.5 pb-1 pt-2.5 text-[10.5px] font-semibold uppercase tracking-[0.08em] text-ink-3">{g.title}</div>
+            <ul className="flex flex-col gap-0.5 pb-1">
               {g.items.map((it) => (
                 <li key={it.to}>
                   <NavLink
                     to={`/admin/${it.to}`}
                     className={({ isActive }) =>
                       cx(
-                        "ripple group relative flex items-center gap-3 rounded-lg px-3 py-2 transition-colors",
-                        isActive ? "bg-surface text-ink shadow-sm ring-1 ring-inset ring-fg/[0.08]" : "text-ink-2 hover:bg-fg/[0.04] hover:text-ink",
+                        "ripple group relative flex items-center gap-3 rounded-xl px-2 py-1.5 transition-colors duration-150",
+                        isActive ? "bg-accent-soft text-ink" : "text-ink-2 hover:bg-fg/[0.04] hover:text-ink",
                       )
                     }
                   >
                     {({ isActive }) => (
                       <>
-                        {isActive && <span aria-hidden className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-accent" />}
-                        <svg aria-hidden viewBox="0 0 16 16" className={cx("h-4 w-4 shrink-0", isActive ? "text-accent-ink" : "text-ink-3 group-hover:text-ink-2")}>
-                          {ICONS[it.to]}
-                        </svg>
-                        <span className="min-w-0 flex-1">
-                          <span className="block text-[13px] font-medium">{it.label}</span>
-                          <span className="block truncate text-[11px] text-ink-3">{it.hint}</span>
+                        <span
+                          className={cx(
+                            "grid h-8 w-8 shrink-0 place-items-center rounded-lg transition-colors duration-150",
+                            isActive ? "bg-btn-primary text-white shadow-[0_1px_2px_rgb(0_0_0/0.15)]" : "bg-fg/[0.05] text-ink-2 ring-1 ring-inset ring-fg/[0.05] group-hover:text-ink",
+                          )}
+                        >
+                          <svg aria-hidden viewBox="0 0 16 16" className="h-4 w-4">
+                            {ICONS[it.to]}
+                          </svg>
                         </span>
-                        {it.count != null && <span className="tabular shrink-0 text-xs text-ink-3">{it.count}</span>}
+                        <span className="min-w-0 flex-1">
+                          <span className={cx("block text-[13px]", isActive ? "font-semibold" : "font-medium")}>{it.label}</span>
+                          <span className="block truncate text-[11.5px] text-ink-3">{it.hint}</span>
+                        </span>
+                        {it.count != null && (
+                          <span
+                            className={cx(
+                              "tabular shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                              isActive ? "bg-surface text-accent-ink ring-1 ring-inset ring-accent/20" : "bg-fg/[0.05] text-ink-2",
+                            )}
+                          >
+                            {it.count}
+                          </span>
+                        )}
                       </>
                     )}
                   </NavLink>
@@ -195,6 +221,7 @@ function ScanCard() {
     },
   });
   const pending = (requests.data ?? []).filter((r) => !r.handled_at);
+  const scansOff = useMe().data?.scans_enabled === false;
 
   function submit(e: FormEvent) {
     e.preventDefault();
@@ -215,6 +242,11 @@ function ScanCard() {
           onConfirm={() => request.mutate(confirming)}
         />
       )}
+      {scansOff ? (
+        <div className="border-y border-fg/5 px-5 py-3">
+          <ScansOffNote />
+        </div>
+      ) : (
       <form onSubmit={submit} className="flex flex-wrap items-end gap-3 border-y border-fg/5 bg-fg/[0.015] px-5 py-3">
         <label className="flex flex-col gap-1">
           <span className="text-[11px] font-medium uppercase tracking-wide text-ink-3">Contest</span>
@@ -232,6 +264,7 @@ function ScanCard() {
           </div>
         )}
       </form>
+      )}
 
       {pending.length > 0 && (
         <div className="border-b border-fg/5 bg-accent-soft/40 px-5 py-2 text-xs text-ink-2">
@@ -258,13 +291,13 @@ function ScanCard() {
         </div>
       ) : runs.isError ? (
         <div className="p-5">
-          <ErrorBox error={runs.error} />
+          <ErrorBox error={runs.error} onRetry={() => runs.refetch()} />
         </div>
       ) : runs.data.length === 0 ? (
         <Empty>No scans yet.</Empty>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="stack-table w-full text-sm">
             <thead className="text-left text-xs text-ink-2">
               <tr className="border-b border-fg/5">
                 <th className="px-5 py-2 font-medium">Contest</th>
@@ -278,22 +311,35 @@ function ScanCard() {
             <tbody>
               {runs.data.map((r) => (
                 <tr key={r.id} className="border-b border-fg/5 align-top last:border-0">
-                  <td className="px-5 py-2.5 font-medium">{slugTitle(r.contest_slug)}</td>
-                  <td className="px-3 py-2.5 text-ink-2">{kindLabel(r.kind)}</td>
-                  <td className="px-3 py-2.5">
+                  <td className="stack-full px-5 py-2.5 font-medium">{slugTitle(r.contest_slug)}</td>
+                  <td data-label="Kind" className="px-3 py-2.5 text-ink-2">{kindLabel(r.kind)}</td>
+                  <td data-label="Status" className="px-3 py-2.5">
                     <Badge tone={RUN_STATUS[r.status][0]} icon={RUN_STATUS[r.status][1]}>
                       {RUN_STATUS[r.status][2]}
                     </Badge>
                     {r.error && <div className="mt-1 max-w-md text-xs text-ink-2">{r.error}</div>}
+                    {r.status === "review" && (
+                      <div className="mt-1 text-xs">
+                        <Link to={`/contests/${r.contest_slug}`} className="text-accent-ink hover:underline">
+                          {r.review_decision === "outdated" ? "Outdated: discard on the contest page" : "Review on the contest page"}
+                        </Link>
+                      </div>
+                    )}
+                    {r.review_decision && r.status !== "review" && r.review_decision !== "published" && (
+                      <div className="mt-1 text-xs text-ink-3">{r.review_decision}{r.reviewed_by ? ` by ${r.reviewed_by}` : ""}</div>
+                    )}
+                    {r.review_decision === "published" && (
+                      <div className="mt-1 text-xs text-ink-3">reviewed and added{r.reviewed_by ? ` by ${r.reviewed_by}` : ""}</div>
+                    )}
                     {r.status === "running" && (
                       <div className="mt-1">
                         <CancelScanButton slug={r.contest_slug} running />
                       </div>
                     )}
                   </td>
-                  <td className="whitespace-nowrap px-3 py-2.5 text-ink-2">{fmtIso(r.started_at)}</td>
-                  <td className="tabular px-3 py-2.5 text-right">{fmtInt(r.participants)}</td>
-                  <td className="tabular px-5 py-2.5 text-right">{fmtInt(r.students)}</td>
+                  <td data-label="Started" className="whitespace-nowrap px-3 py-2.5 text-ink-2">{fmtIso(r.started_at)}</td>
+                  <td data-label="Participants" className="tabular px-3 py-2.5 text-right">{fmtInt(r.participants)}</td>
+                  <td data-label="Students" className="tabular px-5 py-2.5 text-right">{fmtInt(r.students)}</td>
                 </tr>
               ))}
             </tbody>

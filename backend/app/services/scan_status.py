@@ -22,7 +22,9 @@ from app.services.schedule import DEFAULT_FINAL, FinalSchedule, round_up
 from app.services.summaries import DATA_VERSION
 
 HEARTBEAT_KEY = "worker_heartbeat"
-WORKER_STALE = timedelta(minutes=3)  # the worker checks in every minute
+WORKER_STALE = timedelta(minutes=3)  # the worker checks in every minute while awake
+# While it sleeps (outside the database's awake window) the worker writes when it will
+# check in next as the heartbeat's value, and counts as alive until then.
 DEFAULT_SCAN = timedelta(minutes=10)
 AUTO_LOOKBACK = timedelta(days=14)  # the worker auto-scans contests that ended this recently
 AUTO_ATTEMPTS = 4
@@ -55,6 +57,7 @@ class ScanSnapshot:
     pending: list[ScanRequest]
     heartbeat: datetime | None
     data_version: str | None = None  # read in the same query as the heartbeat
+    next_check: datetime | None = None  # when a sleeping worker said it would check in again
 
     def runs_of(self, slug: str) -> list[ScanRun]:
         return [r for r in self.runs if r.contest_slug == slug]
@@ -88,7 +91,14 @@ def load_snapshot(session: Session, slugs: Iterable[str] = ()) -> ScanSnapshot:
     hb = state.get(HEARTBEAT_KEY)
     version = state.get(DATA_VERSION)
     return ScanSnapshot(list(runs), list(pending), as_utc(hb.updated_at) if hb else None,
-                        version.value if version else None)
+                        version.value if version else None, _parse_iso(hb.value) if hb else None)
+
+
+def _parse_iso(text: str | None) -> datetime | None:
+    try:
+        return as_utc(datetime.fromisoformat(text)) if text else None
+    except ValueError:
+        return None
 
 
 def worker_status(session: Session, now: datetime, snap: ScanSnapshot | None = None) -> dict:
@@ -96,7 +106,9 @@ def worker_status(session: Session, now: datetime, snap: ScanSnapshot | None = N
     seen = [snap.heartbeat] if snap.heartbeat else []
     seen += [as_utc(r.progress_at) for r in snap.runs if r.status == "running" and r.progress_at]
     last = max(seen) if seen else None
-    return {"alive": bool(last and now - last < WORKER_STALE), "last_seen": iso(last)}
+    promised = max([t for t in (last, snap.next_check) if t], default=None)
+    return {"alive": bool(promised and now - promised < WORKER_STALE), "last_seen": iso(last),
+            "next_check": iso(snap.next_check) if snap.next_check and last and snap.next_check > last else None}
 
 
 def typical_scan_time(session: Session) -> timedelta:
@@ -197,7 +209,8 @@ def contest_states(session: Session, contests: list[Contest], now: datetime,
         rs = snap.runs_of(c.slug)
         complete = [r for r in rs if r.status == "complete"]
         failed = [r for r in rs if r.status in ("failed", "cancelled")]
-        state: dict = {"has_data": bool(complete)}
+        # a manual scan waiting for an admin's review (services/drafts.py)
+        state: dict = {"has_data": bool(complete), "in_review": any(r.status == "review" for r in rs)}
         if complete:
             last = complete[-1]
             state.update(state=last.kind, scanned_at=iso(last.finished_at))

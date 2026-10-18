@@ -12,7 +12,7 @@ import { useDebounced } from "../useDebounced";
 import UploadReview from "./UploadReview";
 import { fmtInt, fmtIso } from "../format";
 import UploadHistory, { ChangesDialog } from "./UploadHistory";
-import { Badge, Button, Card, CardHeader, ConfirmDialog, Consequences, Empty, ErrorBox, FieldLabel, HandleStatusBadge, Input, LinkButton, Select, cx } from "./ui";
+import { Badge, Button, Card, CardHeader, ConfirmDialog, Consequences, Empty, ErrorBox, FieldLabel, Modal, useFlash, HandleStatusBadge, Input, LinkButton, Select, cx } from "./ui";
 import { RowsSkeleton } from "./skeletons";
 import { patchCache, type Undo } from "../optimistic";
 
@@ -63,6 +63,7 @@ export function UploadButton({ onFile, busy, label = "Upload Excel" }: { onFile:
       <input
         ref={input}
         type="file"
+        aria-label="Choose an Excel or CSV file"
         accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
         className="sr-only"
         tabIndex={-1}
@@ -149,6 +150,7 @@ export default function RosterCard() {
     placeholderData: keepPreviousData,
   });
   const [editing, setEditing] = useState<RosterStudent | "new" | null>(null);
+  const [flashed, flash] = useFlash();
   const [result, setResult] = useState<{ file: string; s: ImportSummary } | null>(null);
   const refresh = () => {
     qc.invalidateQueries({ queryKey: ["roster"] });
@@ -216,26 +218,30 @@ export default function RosterCard() {
       )}
       {result && <ImportResult file={result.file} s={result.s} onClose={() => setResult(null)} />}
       <UploadHistory kind="students" noun="student" />
-      {editing !== null && list.data && (
-        <StudentForm
-          key={editing === "new" ? "new" : editing.id}
-          student={editing === "new" ? null : editing}
-          colleges={list.data.colleges}
-          extraColumns={list.data.extra_columns}
-          onDone={() => {
-            setEditing(null);
-            refresh();
-          }}
-          onCancel={() => setEditing(null)}
-        />
-      )}
+      {/* add / edit over the page where you clicked, not at the top of the list */}
+      <Modal open={editing !== null && !!list.data} onClose={() => setEditing(null)} label={editing === "new" ? "New student" : "Edit student"}>
+        {editing !== null && list.data && (
+          <StudentForm
+            key={editing === "new" ? "new" : editing.id}
+            student={editing === "new" ? null : editing}
+            colleges={list.data.colleges}
+            extraColumns={list.data.extra_columns}
+            onDone={() => {
+              if (editing !== "new" && editing) flash(editing.id); // show which row changed
+              setEditing(null);
+              refresh();
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+      </Modal>
       {list.isPending ? (
         <div className="px-5">
           <RowsSkeleton />
         </div>
       ) : list.isError ? (
         <div className="p-5">
-          <ErrorBox error={list.error} />
+          <ErrorBox error={list.error} onRetry={() => list.refetch()} />
         </div>
       ) : (
         <StudentTable
@@ -256,6 +262,7 @@ export default function RosterCard() {
           onEdit={(s) => setEditing(s)}
           onChanged={refresh}
           editingId={editing !== null && editing !== "new" ? editing.id : null}
+          flashedId={flashed}
         />
       )}
     </Card>
@@ -274,6 +281,7 @@ function StudentTable({
   onEdit,
   onChanged,
   editingId,
+  flashedId,
 }: {
   data: RosterList;
   fetching: boolean;
@@ -286,6 +294,7 @@ function StudentTable({
   onEdit: (s: RosterStudent) => void;
   onChanged: () => void;
   editingId: number | null;
+  flashedId: number | null;
 }) {
   const { students: shown, total, removed, extra_columns: extraColumns } = data;
   const pages = Math.max(1, Math.ceil(total / PAGE));
@@ -317,7 +326,7 @@ function StudentTable({
         <Empty>No students match.</Empty>
       ) : (
         <div className={cx("overflow-x-auto transition-opacity", fetching && "opacity-60")}>
-          <table className="w-full text-sm">
+          <table className="stack-table w-full text-sm">
             <thead className="text-left text-xs text-ink-2">
               <tr className="border-b border-fg/5">
                 <th className="px-5 py-2 font-medium">Student</th>
@@ -325,12 +334,12 @@ function StudentTable({
                 <th className="px-3 py-2 font-medium">LeetCode</th>
                 {extraColumns.length > 0 && <th className="px-3 py-2 font-medium">{extraColumns.join(" · ")}</th>}
                 <th className="px-3 py-2 font-medium">Last change</th>
-                <th className="px-5 py-2" />
+                <th className="px-5 py-2"><span className="sr-only">Actions</span></th>
               </tr>
             </thead>
             <tbody>
               {shown.map((s) => (
-                <StudentRow key={s.id} s={s} extraColumns={extraColumns} onEdit={() => onEdit(s)} onChanged={onChanged} editing={editingId === s.id} />
+                <StudentRow key={s.id} s={s} extraColumns={extraColumns} onEdit={() => onEdit(s)} onChanged={onChanged} editing={editingId === s.id} flashed={flashedId === s.id} />
               ))}
             </tbody>
           </table>
@@ -355,7 +364,7 @@ function StudentTable({
   );
 }
 
-function StudentRow({ s, extraColumns, onEdit, onChanged, editing }: { s: RosterStudent; extraColumns: string[]; onEdit: () => void; onChanged: () => void; editing: boolean }) {
+function StudentRow({ s, extraColumns, onEdit, onChanged, editing, flashed }: { s: RosterStudent; extraColumns: string[]; onEdit: () => void; onChanged: () => void; editing: boolean; flashed?: boolean }) {
   const qc = useQueryClient();
   const [confirm, setConfirm] = useState(false);
   // optimistic: the row (and the counts) change as soon as it's confirmed
@@ -376,8 +385,8 @@ function StudentRow({ s, extraColumns, onEdit, onChanged, editing }: { s: Roster
     onSettled: onChanged,
   });
   return (
-    <tr className={cx("border-b border-fg/5 align-top last:border-0 hover:bg-fg/[0.02]", editing && "bg-accent-soft/30", !s.active && "opacity-60")}>
-      <td className="px-5 py-2.5">
+    <tr className={cx("border-b border-fg/5 align-top last:border-0 hover:bg-fg/[0.02]", editing && "bg-accent-soft/30", flashed && "row-flash", !s.active && "opacity-60")}>
+      <td className="stack-full px-5 py-2.5">
         <Link to={`/students/${s.id}`} className="font-medium text-ink hover:text-accent-ink hover:underline">
           {s.name}
         </Link>
@@ -386,8 +395,8 @@ function StudentRow({ s, extraColumns, onEdit, onChanged, editing }: { s: Roster
           {!s.active && <Badge tone="neutral" icon="dash">Removed</Badge>}
         </div>
       </td>
-      <td className="px-3 py-2.5 text-ink-2">{s.college || <span className="text-ink-3">—</span>}</td>
-      <td className="px-3 py-2.5">
+      <td data-label="College" className="px-3 py-2.5 text-ink-2">{s.college || <span className="text-ink-3">—</span>}</td>
+      <td data-label="LeetCode" className="px-3 py-2.5">
         {s.handle ? (
           <div className="flex flex-col items-start gap-1">
             <span className="text-[13px]">{s.handle}</span>
@@ -398,13 +407,13 @@ function StudentRow({ s, extraColumns, onEdit, onChanged, editing }: { s: Roster
         )}
       </td>
       {extraColumns.length > 0 && (
-        <td className="whitespace-nowrap px-3 py-2.5 text-xs text-ink-2">{extraColumns.map((k) => s.extra[k] || "—").join(" · ")}</td>
+        <td data-label={extraColumns.join(" · ")} className="whitespace-nowrap px-3 py-2.5 text-xs text-ink-2">{extraColumns.map((k) => s.extra[k] || "—").join(" · ")}</td>
       )}
-      <td className="px-3 py-2.5">
+      <td data-label="Last change" className="stack-full px-3 py-2.5">
         {toggle.isPending ? <span className="text-xs text-ink-3">Saving…</span> : <AuditLine a={s} />}
         {toggle.isError && <div className="mt-1 text-xs text-critical">{(toggle.error as Error).message}</div>}
       </td>
-      <td className="whitespace-nowrap px-5 py-2.5 text-right">
+      <td className="stack-full stack-actions whitespace-nowrap px-5 py-2.5 text-right">
         <Button variant="ghost" size="sm" onClick={onEdit}>
           Edit
         </Button>
@@ -470,12 +479,12 @@ function StudentForm({ student, colleges, extraColumns, onDone, onCancel }: { st
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 border-y border-fg/5 bg-fg/[0.015] px-5 py-4">
+    <form onSubmit={submit} className="flex flex-col gap-4 px-5 py-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h3 className="text-[13px] font-semibold text-ink">{student ? `Edit ${student.name}` : "New student"}</h3>
         {student && <AuditLine a={student} className="text-right" />}
       </div>
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-3 sm:grid-cols-2">
         <label className="flex flex-col gap-1">
           <FieldLabel>Roll no</FieldLabel>
           <Input value={form.roll_no} onChange={(e) => set("roll_no", e.target.value)} required placeholder="NW2026001" />

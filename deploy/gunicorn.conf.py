@@ -41,7 +41,10 @@ loglevel = "info"
 logconfig_dict = {
     "version": 1,
     "disable_existing_loggers": False,
-    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"}},
-    "handlers": {"stdout": {"class": "logging.StreamHandler", "formatter": "plain", "stream": "ext://sys.stdout"}},
+    # lines logged during a request carry its ID: "app.errors [3f9c0a…]: …"
+    "filters": {"rid": {"()": "app.request_context.RequestIdFilter"}},
+    "formatters": {"plain": {"format": "%(asctime)s %(levelname)s %(name)s%(rid_tag)s: %(message)s"}},
+    "handlers": {"stdout": {"class": "logging.StreamHandler", "formatter": "plain", "filters": ["rid"],
+                            "stream": "ext://sys.stdout"}},
     "root": {"level": "INFO", "handlers": ["stdout"]},
 }

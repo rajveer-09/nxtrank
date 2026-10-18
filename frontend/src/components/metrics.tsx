@@ -5,6 +5,7 @@
  */
 // Shared bits for analytics views.
 import type { TrendLabel } from "../api";
+import { Link } from "react-router-dom";
 import { Badge } from "./ui";
 
 const ringTone = (score: number) =>
@@ -98,6 +99,9 @@ export function Definitions() {
           </div>
         ))}
       </dl>
+      <p className="mt-2">
+        <Link to="/guide#rules" className="text-accent-ink hover:underline">Every rule, with examples, in the Guide →</Link>
+      </p>
     </details>
   );
 }

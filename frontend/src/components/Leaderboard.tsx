@@ -12,11 +12,11 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import type { ContestResults, ResultRow, ResultStatus } from "../api";
 import { fmtDuration, fmtInt } from "../format";
-import { Button, Empty, Input, LeaderboardRank, Medal, ProfileRank, ResultStatusBadge, Select, cx, resultStatusLabel } from "./ui";
+import { Badge, Button, Empty, Input, LeaderboardRank, Medal, ProfileRank, ResultStatusBadge, Select, cx, resultStatusLabel, scrollToTopOf } from "./ui";
 import { Spacer, useReveal, useWindowRows } from "./virtual";
 
 const STATUS_ORDER: ResultStatus[] = ["solved", "zero", "absent", "invalid_handle", "no_handle", "duplicate_handle"];
@@ -51,7 +51,9 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
   const [college, setCollege] = useState("");
   const [status, setStatus] = useState("");
   const [extraFilters, setExtraFilters] = useState<Record<string, string>>({});
-  const [sorting, setSorting] = useState<SortingState>([]);
+  // the contest's order by default: best rank first, students who didn't take part last
+  const [sorting, setSorting] = useState<SortingState>([{ id: "college_rank", desc: false }]);
+  const root = useRef<HTMLDivElement>(null);
 
   const colleges = useMemo(() => [...new Set(rows.map((r) => r.college).filter(Boolean))].sort(), [rows]);
   const extras = useMemo(() => filterableExtras(rows), [rows]);
@@ -61,7 +63,8 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
     return rows.filter(
       (r) =>
         (!college || r.college === college) &&
-        (!status || (status === "participated" ? r.status === "solved" || r.status === "zero" : r.status === status)) &&
+        (!status ||
+          (status === "participated" ? r.status === "solved" || r.status === "zero" : status === "flagged" ? !!r.flagged : r.status === status)) &&
         Object.entries(extraFilters).every(([k, v]) => !v || r.extra[k] === v) &&
         (!q ||
           r.name.toLowerCase().includes(q) ||
@@ -77,6 +80,11 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
         header: scoped ? "Rank" : "College rank",
         accessorFn: (r) => r.college_rank ?? undefined,
         sortUndefined: "last",
+        // a tied rank goes to less total time (as on LeetCode), then the name
+        sortingFn: (a, b) =>
+          (a.original.college_rank ?? 0) - (b.original.college_rank ?? 0) ||
+          (a.original.total_time_secs ?? Infinity) - (b.original.total_time_secs ?? Infinity) ||
+          a.original.name.localeCompare(b.original.name),
         cell: ({ row }) => {
           const portal = row.original.college_rank;
           const rank = scoped ? rankInScope.get(row.original.student_id) : portal;
@@ -185,7 +193,12 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
         id: "status",
         header: "Status",
         accessorFn: (r) => STATUS_ORDER.indexOf(r.status),
-        cell: ({ row }) => <ResultStatusBadge status={row.original.status} />,
+        cell: ({ row }) => (
+          <span className="inline-flex flex-col items-start gap-1">
+            <ResultStatusBadge status={row.original.status} />
+            {row.original.flagged && <FlaggedBadge row={row.original} />}
+          </span>
+        ),
       },
     ],
     [labels, scoped, rankInScope],
@@ -219,7 +232,7 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
   const firstIndex = pageIndex * pageSize;
 
   return (
-    <div>
+    <div ref={root} className="scroll-mt-20">
       {/* filters: one row above the table */}
       <div className="flex flex-wrap items-center gap-2 border-y border-fg/5 bg-fg/[0.015] px-5 py-2 [&_label>span:first-child]:sr-only">
         <label className="flex min-w-56 flex-1 flex-col gap-1 sm:max-w-xs">
@@ -250,6 +263,7 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
         <Select label="Status" value={status} onChange={(e) => setStatus(e.target.value)}>
           <option value="">Any status</option>
           <option value="participated">Participated</option>
+          {rows.some((r) => r.flagged) && <option value="flagged">Flagged by LeetCode</option>}
           {STATUS_ORDER.filter((s) => rows.some((r) => r.status === s)).map((s) => (
             <option key={s} value={s}>
               {resultStatusLabel(s)}
@@ -275,7 +289,23 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
         <Empty>No students match these filters.</Empty>
       ) : (
         <div className="overflow-x-auto">
-          <table className="w-full text-sm" aria-rowcount={filtered.length + 1}>
+          {/* phones: the headers are hidden (rows become cards), so sorting is a menu */}
+          <div className="flex items-center gap-2 border-b border-fg/5 px-4 py-2 sm:hidden">
+            <Select
+              label="Sort"
+              value={sorting[0] ? `${sorting[0].id}:${sorting[0].desc ? "desc" : "asc"}` : "college_rank:asc"}
+              onChange={(e) => {
+                const [id, dir] = e.target.value.split(":");
+                setSorting([{ id, desc: dir === "desc" }]);
+              }}
+            >
+              {table.getAllLeafColumns().filter((c) => c.getCanSort() && typeof c.columnDef.header === "string").flatMap((c) => [
+                <option key={`${c.id}:asc`} value={`${c.id}:asc`}>{`${c.columnDef.header as string} ↑`}</option>,
+                <option key={`${c.id}:desc`} value={`${c.id}:desc`}>{`${c.columnDef.header as string} ↓`}</option>,
+              ])}
+            </Select>
+          </div>
+          <table className="stack-table w-full text-sm" aria-rowcount={filtered.length + 1}>
             <thead>
               {table.getHeaderGroups().map((hg) => (
                 <tr key={hg.id} className="border-b border-fg/5 text-xs text-ink-2">
@@ -317,7 +347,11 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
                   {row.getVisibleCells().map((cell) => {
                     const right = (cell.column.columnDef.meta as { align?: string } | undefined)?.align === "right";
                     return (
-                      <td key={cell.id} className={cx("px-3 py-2.5 first:pl-5 last:pr-5", right && "text-right")}>
+                      <td
+                        key={cell.id}
+                        data-label={cell.column.id === "name" || typeof cell.column.columnDef.header !== "string" ? undefined : cell.column.columnDef.header}
+                        className={cx("px-3 py-2.5 first:pl-5 last:pr-5", right && "text-right", cell.column.id === "name" && "stack-full stack-first")}
+                      >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </td>
                     );
@@ -344,14 +378,36 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
             ))}
             <option value={ALL_ROWS}>All rows</option>
           </Select>
-          <Button onClick={() => table.previousPage()} disabled={!table.getCanPreviousPage()}>
+          <Button onClick={() => { table.previousPage(); scrollToTopOf(root.current); }} disabled={!table.getCanPreviousPage()}>
             Previous
           </Button>
-          <Button onClick={() => table.nextPage()} disabled={!table.getCanNextPage()}>
+          <Button onClick={() => { table.nextPage(); scrollToTopOf(root.current); }} disabled={!table.getCanNextPage()}>
             Next
           </Button>
         </div>
       </div>
     </div>
+  );
+}
+
+/** What LeetCode did to an entry after the contest, in words. */
+export function flaggedText(r: ResultRow): string {
+  const f = r.flagged;
+  if (!f) return "";
+  const before = `${f.early_rank ? `rank ${f.early_rank.toLocaleString()} with ` : ""}${f.early_score ?? 0} pts on the early results`;
+  const after =
+    r.status !== "solved" && r.status !== "zero"
+      ? "removed from the final leaderboard"
+      : (r.score ?? 0) === 0
+        ? "score set to 0 on the final leaderboard"
+        : `moved to rank ${r.global_rank?.toLocaleString()} on the final leaderboard`;
+  return `${before}; ${after}`;
+}
+
+function FlaggedBadge({ row }: { row: ResultRow }) {
+  return (
+    <span title={`${flaggedText(row)}. LeetCode does this to entries it finds breaking contest rules; it doesn't publish the reason.`}>
+      <Badge tone="critical" icon="alert">Flagged by LeetCode</Badge>
+    </span>
   );
 }

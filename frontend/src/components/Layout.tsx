@@ -4,11 +4,13 @@
  * Date: 14 October 2026
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { NavLink, useLocation } from "react-router-dom";
 import type { Me } from "../api";
-import { useLogout } from "../auth";
+import { useLogout, useViewAs } from "../auth";
 import { useIntentPrefetch } from "../prefetch";
 import { useTheme } from "../theme";
+import ErrorBoundary from "./ErrorBoundary";
 import { PopoverPanel, cx, usePopover } from "./ui";
 
 export const LOGO_URL = "https://d14qv6cm1t62pm.cloudfront.net/ccbp-website/Nxtwave_Colored.svg";
@@ -158,15 +160,91 @@ function UserMenu({ me }: { me: Me }) {
   );
 }
 
+const NAV_ICONS: Record<string, ReactNode> = {
+  "/": <path d="M5 2.5h6v3.5a3 3 0 0 1-6 0V2.5ZM5 4H2.5v1A2.5 2.5 0 0 0 5 7.5M11 4h2.5v1A2.5 2.5 0 0 1 11 7.5M8 9v2.5M5.5 13.5h5M6.5 11.5h3v2h-3z" />,
+  "/analytics": <path d="M2.5 13.5h11M4.5 11V8M8 11V4.5M11.5 11V6.5" />,
+  "/students": <path d="M6 7.5a2.25 2.25 0 1 0 0-4.5 2.25 2.25 0 0 0 0 4.5ZM2 13c.3-2.2 1.9-3.5 4-3.5s3.7 1.3 4 3.5M10.5 3.2a2.25 2.25 0 0 1 0 4.1M12 9.8c1.1.5 1.8 1.6 2 3.2" />,
+  "/my-students": <path d="M7 7.5a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5ZM2.5 13.5c.4-2.4 2.2-4 4.5-4 1 0 1.9.3 2.6.8M10 12l1.5 1.5L14 11" />,
+  "/admin": <path d="M8 1.75 13.5 4v3.6c0 3.1-2.3 5.6-5.5 6.65C4.8 13.2 2.5 10.7 2.5 7.6V4L8 1.75ZM5.75 8l1.6 1.6L10.5 6.5" />,
+  "/guide": <path d="M2.5 3.5c1.8-.6 3.7-.4 5.5.7 1.8-1.1 3.7-1.3 5.5-.7v9c-1.8-.6-3.7-.4-5.5.7-1.8-1.1-3.7-1.3-5.5-.7v-9ZM8 4.2v9" />,
+};
+
+/** Phones: the main sections as a tab bar at the bottom, within thumb reach. */
+function BottomNav({ links, onSame }: { links: { to: string; label: string; end: boolean }[]; onSame: () => void }) {
+  // in <body>: the app's entrance animation leaves a transform on the wrapper, which
+  // would pin a fixed element to the page instead of the screen
+  return createPortal(
+    <nav aria-label="Main" className="bottom-nav fixed inset-x-0 bottom-0 z-30 border-t border-fg/[0.08] pb-[env(safe-area-inset-bottom)] md:hidden">
+      <ul className="mx-auto grid max-w-lg" style={{ gridTemplateColumns: `repeat(${links.length}, minmax(0, 1fr))` }}>
+        {links.map((l) => (
+          <li key={l.to}>
+            <NavLink
+              to={l.to}
+              end={l.end}
+              onClick={onSame}
+              className={({ isActive }) =>
+                cx("flex h-14 flex-col items-center justify-center gap-1 text-[11px] font-medium", isActive ? "text-accent-ink" : "text-ink-2 active:text-ink")
+              }
+            >
+              {({ isActive }) => (
+                <>
+                  <span className={cx("grid h-7 w-12 place-items-center rounded-full transition-colors", isActive && "bg-accent-soft")}>
+                    <svg aria-hidden viewBox="0 0 16 16" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+                      {NAV_ICONS[l.to]}
+                    </svg>
+                  </span>
+                  <span className="max-w-full truncate px-0.5">{l.label}</span>
+                </>
+              )}
+            </NavLink>
+          </li>
+        ))}
+      </ul>
+    </nav>,
+    document.body,
+  );
+}
+
+/** On every page while an admin views the dashboard as an instructor. */
+function ViewingAsBanner({ me }: { me: Me }) {
+  const { stop, pending } = useViewAs();
+  const until = me.viewing_as ? new Date(me.viewing_as.until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : "";
+  return (
+    <div role="status" className="border-b border-accent/25 bg-accent-soft px-4 py-2 text-center text-[13px] text-ink">
+      You're viewing as <span className="font-semibold">{me.name || me.username}</span> (instructor), read-only until {until} ·{" "}
+      <button type="button" onClick={() => stop()} disabled={pending} className="font-semibold text-accent-ink underline-offset-2 hover:underline disabled:opacity-60">
+        {pending ? "Returning…" : "Return to admin"}
+      </button>
+    </div>
+  );
+}
+
+/** navigator.onLine, kept up to date. */
+function useOnline() {
+  const [online, setOnline] = useState(() => navigator.onLine);
+  useEffect(() => {
+    const update = () => setOnline(navigator.onLine);
+    window.addEventListener("online", update);
+    window.addEventListener("offline", update);
+    return () => {
+      window.removeEventListener("online", update);
+      window.removeEventListener("offline", update);
+    };
+  }, []);
+  return online;
+}
+
 export default function Layout({ me, children }: { me: Me; children: ReactNode }) {
   const { pathname } = useLocation();
   useIntentPrefetch(me.role); // any link about to be opened: its page's code and data
+  const online = useOnline();
   const links = [
     ...(me.role === "instructor" ? [{ to: "/my-students", label: "My students", end: false }] : []),
     { to: "/", label: "Contests", end: true },
     { to: "/analytics", label: "Analytics", end: false },
     { to: "/students", label: "Students", end: false },
     ...(me.role === "admin" ? [{ to: "/admin", label: "Admin", end: false }] : []),
+    { to: "/guide", label: "Guide", end: false },
   ];
 
   // A highlight that slides to the active tab, and a hover highlight that glides
@@ -209,6 +287,10 @@ export default function Layout({ me, children }: { me: Me; children: ReactNode }
 
   return (
     <div className="app-enter min-h-screen">
+      {/* keyboard users: jump past the navigation */}
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus:z-50 focus:rounded-md focus:bg-surface focus:px-3 focus:py-2 focus:text-[13px] focus:font-medium focus:text-ink focus:shadow-[var(--shadow-pop)]">
+        Skip to content
+      </a>
       <header className="app-header sticky top-0 z-30">
         <div className="mx-auto flex h-16 max-w-7xl items-center gap-3 px-4 sm:px-6 md:grid md:grid-cols-[1fr_auto_1fr] md:gap-6">
           <NavLink to="/" onClick={toTop} aria-label="NxtRank home" className="ripple -ml-1 shrink-0 justify-self-start rounded-md p-1">
@@ -216,7 +298,8 @@ export default function Layout({ me, children }: { me: Me; children: ReactNode }
           </NavLink>
           <nav
             ref={navRef}
-            className="nav-track relative flex min-w-0 items-center gap-2 overflow-x-auto rounded-[10px] p-1 md:justify-self-center"
+            aria-label="Main"
+            className="nav-track relative hidden min-w-0 items-center gap-2 overflow-x-auto rounded-[10px] p-1 md:flex md:justify-self-center"
             onMouseLeave={() => setHover(null)}
           >
             <span
@@ -255,7 +338,16 @@ export default function Layout({ me, children }: { me: Me; children: ReactNode }
           </div>
         </div>
       </header>
-      <main key={pathname.split("/")[1]} className="page-enter mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">{children}</main>
+      {me.viewing_as && <ViewingAsBanner me={me} />}
+      {!online && (
+        <div role="status" className="border-b border-warning/30 bg-warning/10 px-4 py-2 text-center text-[13px] text-warning-ink">
+          You're offline. What's on screen may be out of date; it refreshes once you're back online.
+        </div>
+      )}
+      <main id="main" tabIndex={-1} key={pathname.split("/")[1]} className="page-enter outline-none mx-auto max-w-7xl px-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-6 sm:px-6 sm:pt-8 md:pb-8">
+        <ErrorBoundary key={pathname}>{children}</ErrorBoundary>
+      </main>
+      <BottomNav links={links} onSame={toTop} />
     </div>
   );
 }

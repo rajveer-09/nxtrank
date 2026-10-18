@@ -110,6 +110,7 @@ def settings():
         slack_webhook_url=None, telegram_bot_token=None, telegram_chat_id=None,
         display_tz="Asia/Kolkata", scan_delay_minutes=30, final_scan_working_days=5, final_scan_time="23:00",
         secret_key="test", cookie_secure=False, frontend_dist=Path("/nonexistent"),
+        scan_review_enabled=False,  # the draft tests turn it on (test_drafts.py)
     )
 
 

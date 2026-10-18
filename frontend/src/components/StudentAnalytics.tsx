@@ -5,7 +5,8 @@
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect } from "react";
-import { analyticsApi, type StudentAnalytics } from "../api";
+import { ApiError, analyticsApi, topicsApi, type StudentAnalytics } from "../api";
+import { TopicsCard } from "./Topics";
 import { fmtDate, fmtDecimal, fmtDuration, fmtInt, fmtIso, fmtPct } from "../format";
 import { ChartTable, ColumnChart, LineChart, Meter, shortContest } from "./charts";
 import { ConsistencyBadge, Definitions, TrendBadge, fmtTopPct } from "./metrics";
@@ -29,19 +30,29 @@ export default function StudentAnalyticsSection({ id }: { id: number }) {
   const { mutate } = live;
   useEffect(() => mutate(), [id, mutate]);
   if (q.isPending) return <StudentAnalyticsSkeleton />;
-  if (q.isError) return <ErrorBox error={q.error} />;
+  if (q.isError) return <ErrorBox error={q.error} onRetry={() => q.refetch()} />;
   const a = q.data;
   return (
     <>
-      <Tiles a={a} live={live.isPending ? "checking" : live.isError ? "failed" : live.isSuccess ? "live" : null} />
+      <Tiles a={a} live={live.isPending ? "checking" : live.isError ? (noHandle(live.error) ? null : "failed") : live.isSuccess ? "live" : null}
+        liveError={live.error} />
       <Definitions />
       <QuestionBreakdown a={a} />
+      <TopicsCard
+        queryKey={["student", id]}
+        fetch={() => topicsApi.student(id)}
+        compare={{ queryKey: ["cohort", "all"], fetch: () => topicsApi.cohort({}), label: "All students" }}
+        subtitle="How this student does on each topic, across every scanned contest they took part in, against all students."
+      />
       <Charts a={a} />
     </>
   );
 }
 
-function Tiles({ a, live }: { a: StudentAnalytics; live: "checking" | "live" | "failed" | null }) {
+/** No LeetCode handle: there's no live rating to fetch, which isn't a failure. */
+const noHandle = (e: unknown) => e instanceof ApiError && e.status === 422;
+
+function Tiles({ a, live, liveError }: { a: StudentAnalytics; live: "checking" | "live" | "failed" | null; liveError?: unknown }) {
   const r = a.rating;
   return (
     <div className="kpi-row grid grid-cols-2 gap-2 md:grid-cols-3 xl:grid-cols-6">
@@ -80,7 +91,9 @@ function Tiles({ a, live }: { a: StudentAnalytics; live: "checking" | "live" | "
                   <span className="h-1.5 w-1.5 rounded-full bg-good" /> live from LeetCode
                 </>
               ) : live === "failed" ? (
-                <>LeetCode didn't answer{r.synced_at ? ` · as of ${fmtIso(r.synced_at)}` : ""}</>
+                <span title={liveError instanceof Error ? liveError.message : undefined}>
+                  {r.synced_at ? `saved rating, as of ${fmtIso(r.synced_at)}` : "LeetCode isn't answering right now"}
+                </span>
               ) : null}
             </span>
           </span>

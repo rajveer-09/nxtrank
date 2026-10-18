@@ -76,9 +76,15 @@ def load_contest_results(session: Session, slug: str) -> ContestResults:
                 },
                 data_region="",
             )
-        results.append(StudentResult(student, Status(r.status), participant, r.college_rank))
+        flag = ({"early_rank": r.early_rank, "early_score": r.early_score, "early_solved": r.early_solved}
+                if r.flag else None)
+        results.append(StudentResult(student, Status(r.status), participant, r.college_rank, flag))
 
+    # the contest's own order: college rank (rank among the portal's students in this
+    # contest), a tie going to less total time; then those who didn't take part
     results.sort(key=lambda x: (
+        x.college_rank if x.college_rank is not None else float("inf"),
+        (x.participant.total_time_secs if x.participant and x.participant.total_time_secs is not None else float("inf")),
         x.participant.global_rank if x.participant else float("inf"),
         _STATUS_ORDER[x.status.value],
         x.student.name.lower(),

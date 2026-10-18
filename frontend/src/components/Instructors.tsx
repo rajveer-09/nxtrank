@@ -11,7 +11,7 @@ import UploadReview from "./UploadReview";
 import { fmtInt } from "../format";
 import { AuditLine, ImportResult, UploadButton } from "./Roster";
 import UploadHistory from "./UploadHistory";
-import { Badge, Button, Card, CardHeader, ConfirmDialog, Consequences, Empty, ErrorBox, FieldLabel, Input, LinkButton, Textarea, cx } from "./ui";
+import { Badge, Button, Card, CardHeader, ConfirmDialog, Consequences, Empty, ErrorBox, FieldLabel, Modal, useFlash, Input, LinkButton, Textarea, cx } from "./ui";
 import { RowsSkeleton } from "./skeletons";
 import { patchCache, type Undo } from "../optimistic";
 
@@ -22,6 +22,7 @@ export default function InstructorsCard() {
   const qc = useQueryClient();
   const list = useQuery({ queryKey: ["instructors"], queryFn: instructorsApi.list });
   const [editing, setEditing] = useState<Instructor | "new" | null>(null);
+  const [flashed, flash] = useFlash();
   const refresh = () => qc.invalidateQueries({ queryKey: ["instructors"] });
   const [result, setResult] = useState<{ file: string; s: ImportSummary } | null>(null);
   const [review, setReview] = useState<{ file: File; data: UploadPreview } | null>(null);
@@ -83,32 +84,36 @@ export default function InstructorsCard() {
       )}
       {result && <ImportResult file={result.file} s={result.s} onClose={() => setResult(null)} />}
       <UploadHistory kind="instructors" noun="instructor" />
-      {editing !== null && list.data && (
-        <InstructorForm
-          key={editing === "new" ? "new" : editing.id}
-          instructor={editing === "new" ? null : editing}
-          colleges={list.data.colleges}
-          onDone={() => {
-            setEditing(null);
-            refresh();
-          }}
-          onCancel={() => setEditing(null)}
-        />
-      )}
+      {/* add / edit over the page where you clicked, not at the top of the list */}
+      <Modal open={editing !== null && !!list.data} onClose={() => setEditing(null)} label={editing === "new" ? "New instructor" : "Edit instructor"}>
+        {editing !== null && list.data && (
+          <InstructorForm
+            key={editing === "new" ? "new" : editing.id}
+            instructor={editing === "new" ? null : editing}
+            colleges={list.data.colleges}
+            onDone={() => {
+              if (editing !== "new" && editing) flash(editing.id); // show which row changed
+              setEditing(null);
+              refresh();
+            }}
+            onCancel={() => setEditing(null)}
+          />
+        )}
+      </Modal>
       {list.isPending ? (
         <div className="px-5">
           <RowsSkeleton />
         </div>
       ) : list.isError ? (
         <div className="p-5">
-          <ErrorBox error={list.error} />
+          <ErrorBox error={list.error} onRetry={() => list.refetch()} />
         </div>
       ) : list.data.instructors.length === 0 ? (
         <Empty>No instructors yet.</Empty>
       ) : (
         <ul className="divide-y divide-fg/5 border-t border-fg/5">
           {list.data.instructors.map((i) => (
-            <InstructorRow key={i.id} i={i} onEdit={() => setEditing(i)} onChanged={refresh} editing={editing !== null && editing !== "new" && editing.id === i.id} />
+            <InstructorRow key={i.id} i={i} onEdit={() => setEditing(i)} onChanged={refresh} editing={editing !== null && editing !== "new" && editing.id === i.id} flashed={flashed === i.id} />
           ))}
         </ul>
       )}
@@ -116,7 +121,7 @@ export default function InstructorsCard() {
   );
 }
 
-function InstructorRow({ i, onEdit, onChanged, editing }: { i: Instructor; onEdit: () => void; onChanged: () => void; editing: boolean }) {
+function InstructorRow({ i, onEdit, onChanged, editing, flashed }: { i: Instructor; onEdit: () => void; onChanged: () => void; editing: boolean; flashed?: boolean }) {
   const qc = useQueryClient();
   const [confirm, setConfirm] = useState<"toggle" | "delete" | null>(null);
   const done = () => {
@@ -142,10 +147,12 @@ function InstructorRow({ i, onEdit, onChanged, editing }: { i: Instructor; onEdi
   const err = toggle.error ?? remove.error;
 
   return (
-    <li className={cx("flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-4", editing && "bg-accent-soft/30", !i.active && "opacity-70")}>
+    <li className={cx("flex flex-col gap-2 px-5 py-3 sm:flex-row sm:items-center sm:gap-4", editing && "bg-accent-soft/30", flashed && "row-flash", !i.active && "opacity-70")}>
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[13px] font-semibold text-ink">{i.name}</span>
+          <Link to={`/admin/instructors/${i.id}`} className="text-[13px] font-semibold text-ink hover:text-accent-ink hover:underline">
+            {i.name}
+          </Link>
           {i.active ? (
             <Badge tone="good" icon="check">Active</Badge>
           ) : (
@@ -171,8 +178,8 @@ function InstructorRow({ i, onEdit, onChanged, editing }: { i: Instructor; onEdi
       <div className="tabular shrink-0 text-xs text-ink-2 sm:w-24 sm:text-right">{fmtInt(i.students)} students</div>
       <AuditLine a={i} className="shrink-0 sm:w-48" />
       <div className="flex shrink-0 flex-wrap items-center gap-1">
-        <Link to={`/my-students?instructor=${i.id}`} className="rounded-md px-2.5 py-1 text-xs font-medium text-accent-ink hover:bg-accent-soft">
-          View
+        <Link to={`/admin/instructors/${i.id}`} className="rounded-md px-2.5 py-1 text-xs font-medium text-accent-ink hover:bg-accent-soft">
+          Open
         </Link>
         <Button variant="ghost" size="sm" onClick={onEdit}>
           Edit
@@ -251,7 +258,7 @@ function InstructorForm({ instructor, colleges, onDone, onCancel }: { instructor
   }
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4 border-y border-fg/5 bg-fg/[0.015] px-5 py-4">
+    <form onSubmit={submit} className="flex flex-col gap-4 px-5 py-5">
       <h3 className="text-[13px] font-semibold text-ink">{instructor ? `Edit ${instructor.name}` : "New instructor"}</h3>
       <div className="grid gap-3 sm:grid-cols-3">
         <label className="flex flex-col gap-1">
