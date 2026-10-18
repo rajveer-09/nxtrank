@@ -17,6 +17,7 @@ from app.db.models import (
     User,
 )
 from app.db.session import make_engine, make_session_factory
+from app.services import summaries
 from tests.dbutil import fresh_url
 
 
@@ -86,7 +87,8 @@ def test_clear_data_previews_then_clears_and_preserves_setup(tmp_path, capsys):
                 questions={},
             )
         )
-        session.add(CohortStats(win=0, payload={}))
+        # merge: on PostgreSQL the migrations already built the summary rows
+        session.merge(CohortStats(win=0, payload={}))
         session.commit()
         instructor_id, admin_id, college_id = instructor.id, admin.id, college.id
     capsys.readouterr()
@@ -118,9 +120,13 @@ def test_clear_data_previews_then_clears_and_preserves_setup(tmp_path, capsys):
             RatingHistory,
             InstructorStudent,
             StudentStats,
-            CohortStats,
         ):
             assert session.scalar(select(func.count()).select_from(model)) == 0
+        # PostgreSQL rebuilds the cohort summaries after every change to results, so they
+        # describe the now-empty data (one row per window); SQLite doesn't keep them
+        rebuilt = session.scalar(select(func.count()).select_from(CohortStats))
+        assert rebuilt == (len(summaries.WINDOWS) if summaries.supported(session) else 0)
+        assert session.scalar(select(func.count()).select_from(StudentStats)) == 0
         assert session.scalar(select(func.count()).select_from(Contest)) == 1
         assert session.get(User, admin_id) is not None
         assert session.get(User, instructor_id) is not None
