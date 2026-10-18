@@ -36,7 +36,7 @@ def test_admin_adds_edits_deactivates_and_deletes_an_instructor(env):
     assert r.status_code == 200 and r.json()["roll_nos"] == ["R3"] and r.json()["students"] == 3
 
     c, login = _login(env)
-    assert login.json() == {"username": "asha@nxtwave.co.in", "role": "instructor", "name": "Asha R.", "is_super": False}
+    assert login.json() == {"username": "asha@nxtwave.co.in", "role": "instructor", "name": "Asha R.", "is_super": False, "scans_enabled": True, "viewing_as": None}
     mine = c.get("/api/instructor/analytics/students").json()
     assert {s["roll_no"] for s in mine["rows"]} == {"R1", "R2", "R3"} and mine["total"] == 3
     assert c.get("/api/instructor/analytics").json()["instructor"]["name"] == "Asha R."

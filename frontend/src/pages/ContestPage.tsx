@@ -5,12 +5,14 @@
  */
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { api, type ContestDetail, type ContestScope } from "../api";
+import { Link, useParams, useSearchParams } from "react-router-dom";
+import { api, instructorsApi, type ContestDetail, type ContestScope, type ResultRow } from "../api";
 import { useMe } from "../auth";
 import { ChartTable, ColumnChart } from "../components/charts";
 import { CancelScanButton, GetResultsButton, NoResultsPanel, StatusDetail } from "../components/ContestStatus";
-import Leaderboard from "../components/Leaderboard";
+import { DraftBanner } from "../components/DraftReview";
+import { QuestionChips } from "../components/Topics";
+import Leaderboard, { flaggedText } from "../components/Leaderboard";
 import { Card, CardHeader, ErrorBox, ExternalLink, LinkButton, Select, Stat, cx } from "../components/ui";
 import { fmtDateTime, fmtDecimal, fmtDuration, fmtInt, fmtIso, fmtPct, fmtWhen } from "../format";
 import { contestQuery, resultsQuery } from "../queries";
@@ -23,8 +25,14 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
   const { slug = "" } = useParams();
   const qc = useQueryClient();
   const me = useMe().data;
-  // instructors start with their own students; everyone else with the whole portal
-  const [scope, setScope] = useState<ContestScope>(me?.role === "instructor" ? "mine" : "all");
+  // instructors start with their own students; admins coming from an instructor's page
+  // with that instructor's; everyone else with the whole portal
+  const fromInstructor = Number(useSearchParams()[0].get("instructor")) || null;
+  const [scope, setScope] = useState<ContestScope>(
+    me?.role === "instructor" ? "mine" : fromInstructor && me?.role === "admin" ? `instructor:${fromInstructor}` : "all",
+  );
+  const instructors = useQuery({ queryKey: ["instructors"], queryFn: instructorsApi.list, enabled: fromInstructor != null && me?.role === "admin" });
+  const instructor = instructors.data?.instructors.find((i) => i.id === fromInstructor);
   const detail = useQuery({
     ...contestQuery(slug, scope),
     placeholderData: keepPreviousData,
@@ -44,7 +52,7 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
   }, [scannedAt, qc]);
 
   if (detail.isPending) return <ContestSkeleton />;
-  if (detail.isError) return <ErrorBox error={detail.error} />;
+  if (detail.isError) return <ErrorBox error={detail.error} onRetry={() => detail.refetch()} />;
   const c = detail.data;
   const s = c.summary;
 
@@ -60,6 +68,7 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
             {fmtDateTime(c.start_time)} · <ExternalLink href={c.leetcode_url}>LeetCode page</ExternalLink>
           </p>
         </div>
+        {c.review && <DraftBanner review={c.review} />}
         <NoResultsPanel slug={slug} status={c.status} isAdmin={isAdmin} worker={scan.data?.worker} />
       </div>
     );
@@ -107,7 +116,9 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
         </div>
       </div>
 
-      <ScopeBar scope={scope} setScope={setScope} colleges={c.colleges} isInstructor={me?.role === "instructor"} loading={detail.isPlaceholderData} />
+      {c.review && <DraftBanner review={c.review} />}
+      <ScopeBar scope={scope} setScope={setScope} colleges={c.colleges} isInstructor={me?.role === "instructor"} loading={detail.isPlaceholderData}
+        instructor={fromInstructor && me?.role === "admin" ? { id: fromInstructor, name: instructor?.name ?? "This instructor" } : null} />
 
       <div className={cx("kpi-row grid grid-cols-2 gap-2 transition-opacity md:grid-cols-3 xl:grid-cols-6", detail.isPlaceholderData && "opacity-60")}>
         <Stat label="Participated" value={`${fmtInt(s.participated)} / ${fmtInt(s.students)}`} sub={`${fmtPct(s.participation_rate)} of students`} />
@@ -118,6 +129,7 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
         <Stat label="Handle problems" value={fmtInt(s.invalid_handle + s.no_handle)} sub="invalid or missing handle" />
       </div>
 
+      {results.data && <FlaggedCard rows={results.data.rows.filter((r) => r.flagged)} />}
       <QuestionStats c={c} />
       {/* below the first screen: drawn right after it, one section at a time */}
       <Later order={1} minHeight={380}>
@@ -127,7 +139,8 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
         <CollegeBreakdown c={c} />
       </Later>
 
-      <Later order={3} minHeight={900}>
+      {/* the heaviest part (up to 1,500 rows): built when the reader scrolls towards it */}
+      <Later order={3} minHeight={900} whenNear>
       <Card>
         <CardHeader
           title="Students"
@@ -139,7 +152,7 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
           </div>
         ) : results.isError ? (
           <div className="p-5">
-            <ErrorBox error={results.error} />
+            <ErrorBox error={results.error} onRetry={() => results.refetch()} />
           </div>
         ) : (
           <Leaderboard data={results.data} scoped={scope !== "all"} />
@@ -154,7 +167,14 @@ function QuestionStats({ c }: { c: ContestDetail }) {
   const participants = c.summary.participated;
   return (
     <Card>
-      <CardHeader title="Questions" subtitle="Share of participating students who solved each question." />
+      <CardHeader
+        title="Questions"
+        subtitle={
+          c.questions.some((q) => q.topics?.state === "provisional")
+            ? "Share of participating students who solved each question. Dashed topic chips are provisional, from community solutions, until LeetCode publishes official tags."
+            : "Share of participating students who solved each question."
+        }
+      />
       <ul className="divide-y divide-border">
         {c.questions.map((q) => {
           const rate = q.solve_rate ?? 0;
@@ -171,6 +191,9 @@ function QuestionStats({ c }: { c: ContestDetail }) {
                   q.title
                 )}
                 <span className="ml-2 text-xs text-ink-3">{q.credit} pts</span>
+                <div className="mt-1">
+                  <QuestionChips t={q.topics} />
+                </div>
               </div>
               <div className="flex items-center gap-3" title={tooltip}>
                 <div
@@ -297,20 +320,30 @@ function ScopeBar({
   colleges,
   isInstructor,
   loading,
+  instructor,
 }: {
   scope: ContestScope;
   setScope: (s: ContestScope) => void;
   colleges: string[];
   isInstructor: boolean;
   loading: boolean;
+  /** admins arriving from an instructor's page can limit the page to their students */
+  instructor: { id: number; name: string } | null;
 }) {
-  if (!isInstructor && colleges.length < 2) return null;
+  if (!isInstructor && !instructor && colleges.length < 2) return null;
   const label =
-    scope === "mine" ? "your students" : scope.startsWith("college:") ? scope.slice("college:".length) : "every student in the portal";
+    scope === "mine"
+      ? "your students"
+      : scope.startsWith("instructor:")
+        ? `${instructor?.name ?? "this instructor"}'s students`
+        : scope.startsWith("college:")
+          ? scope.slice("college:".length)
+          : "every student in the portal";
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl bg-fg/[0.025] px-4 py-2.5 ring-1 ring-inset ring-fg/[0.06]">
       <Select label="Showing" hideLabel value={scope} onChange={(e) => setScope(e.target.value as ContestScope)}>
         {isInstructor && <option value="mine">My students</option>}
+        {instructor && <option value={`instructor:${instructor.id}`}>{instructor.name}'s students</option>}
         <option value="all">All colleges</option>
         {colleges.map((c) => (
           <option key={c} value={`college:${c}`}>
@@ -323,5 +356,32 @@ function ScopeBar({
         {loading && <span className="ml-2 text-ink-3">Updating…</span>}
       </span>
     </div>
+  );
+}
+
+/** Students LeetCode penalised after the contest: on the early results with a score, then
+ *  removed, zeroed or moved to the bottom of the final leaderboard. */
+function FlaggedCard({ rows }: { rows: ResultRow[] }) {
+  if (!rows.length) return null;
+  return (
+    <Card>
+      <CardHeader
+        title={`Flagged by LeetCode · ${rows.length}`}
+        subtitle="These students scored on the early results, but LeetCode later removed them from the final leaderboard, set their score to 0 or moved them to the bottom. LeetCode does this to entries it finds breaking contest rules (for example, copied solutions), but it doesn't publish the reason, so check before acting."
+      />
+      <ul className="divide-y divide-fg/5 border-t border-fg/5">
+        {rows.map((r) => (
+          <li key={r.student_id} className="flex flex-col gap-1 px-5 py-2.5 sm:flex-row sm:items-center sm:gap-4">
+            <div className="min-w-0 sm:w-64">
+              <Link to={`/students/${r.student_id}`} className="font-medium text-ink hover:text-accent-ink hover:underline">
+                {r.name}
+              </Link>
+              <div className="truncate text-xs text-ink-3">{[r.roll_no, r.college, r.leetcode_handle].filter(Boolean).join(" · ")}</div>
+            </div>
+            <div className="text-[13px] text-ink-2 first-letter:uppercase">{flaggedText(r)}</div>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

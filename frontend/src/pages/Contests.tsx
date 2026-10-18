@@ -41,20 +41,30 @@ export default function Contests({ isAdmin }: { isAdmin: boolean }) {
     if (likely) return whenIdle(() => prefetchPath(qc, `/contests/${likely}`, role));
   }, [likely, qc, role]);
 
-  if (contests.isPending) return <ContestsSkeleton />;
-  if (contests.isError) return <ErrorBox error={contests.error} />;
+  // the heading is static: drawn at once, while the list loads underneath
+  const heading = (
+    <div>
+      <h1 className="text-xl font-semibold tracking-tight text-ink">Contests</h1>
+      <p className="mt-1 text-[13px] text-ink-2">
+        New contests are collected automatically 30 minutes after they end. For any past contest, click{" "}
+        <span className="font-medium text-ink">Get results</span> to fetch it.
+      </p>
+    </div>
+  );
+  if (contests.isPending)
+    return (
+      <div className="relative flex flex-col gap-6">
+        {heading}
+        <ContestsSkeleton title={false} />
+      </div>
+    );
+  if (contests.isError) return <ErrorBox error={contests.error} onRetry={() => contests.refetch()} />;
   const d = contests.data;
   const pages = Math.max(1, Math.ceil(d.total / d.per_page));
 
   return (
     <div className="relative flex flex-col gap-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight text-ink">Contests</h1>
-        <p className="mt-1 text-[13px] text-ink-2">
-          New contests are collected automatically 30 minutes after they end. For any past contest, click{" "}
-          <span className="font-medium text-ink">Get results</span> to fetch it.
-        </p>
-      </div>
+      {heading}
 
       <ScanActivity d={d} />
 
@@ -96,7 +106,7 @@ export default function Contests({ isAdmin }: { isAdmin: boolean }) {
           <Empty>{d.total === 0 && show === "all" && !q ? "The contest list hasn't been loaded yet. The worker fetches it from LeetCode when it starts." : "No contests match."}</Empty>
         ) : (
           <div className={cx("overflow-x-auto transition-opacity", contests.isPlaceholderData && "opacity-60")}>
-            <table className="w-full text-sm">
+            <table className="stack-table w-full text-sm">
               <thead className="text-left text-xs text-ink-2">
                 <tr className="border-b border-fg/5">
                   <th className="px-5 py-2 font-medium">Contest</th>
@@ -105,7 +115,7 @@ export default function Contests({ isAdmin }: { isAdmin: boolean }) {
                   <th className="px-3 py-2 text-right font-medium">Solved ≥ 1</th>
                   <th className="px-3 py-2 text-right font-medium">Avg solved</th>
                   <th className="px-3 py-2 text-right font-medium">Best rank</th>
-                  <th className="px-5 py-2" />
+                  <th className="px-5 py-2"><span className="sr-only">Actions</span></th>
                 </tr>
               </thead>
               <tbody>
@@ -203,24 +213,24 @@ function ContestRow({ c, isAdmin, d, latest }: { c: ContestListItem; isAdmin: bo
   const s = c.summary;
   return (
     <tr className={cx("border-b border-fg/5 align-middle last:border-0 even:bg-fg/[0.022] hover:bg-fg/[0.05]", latest && "latest-row")}>
-      <td className="px-5 py-2.5">
+      <td className="stack-full px-5 py-2.5">
         <div className="flex items-center gap-2">
           <Link to={`/contests/${c.slug}`} className={cx("text-[13px] font-medium hover:underline", c.has_data || latest ? "text-ink hover:text-accent-ink" : "text-ink-2 hover:text-ink")}>
             {c.title}
           </Link>
           {latest && (
-            <span className="rounded-full bg-accent px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-white">Latest</span>
+            <span className="rounded-full bg-btn-primary px-1.5 py-px text-[10px] font-semibold uppercase tracking-wide text-white">Latest</span>
           )}
         </div>
         <div className="text-xs text-ink-3">{fmtDateTime(c.start_time)}</div>
       </td>
-      <td className="px-3 py-2.5">
+      <td className="stack-full px-3 py-2.5">
         <div className="flex flex-col items-start gap-1">
           <ContestStateBadge state={c.state} />
           <StatusDetail status={c} worker={d.worker} />
         </div>
       </td>
-      <td className="tabular px-3 py-2.5 text-right">
+      <td data-label="Participated" className={cx("tabular px-3 py-2.5 text-right", !s && "stack-hide")}>
         {s && (
           <>
             {fmtInt(s.participated)} / {fmtInt(s.students)}
@@ -228,10 +238,10 @@ function ContestRow({ c, isAdmin, d, latest }: { c: ContestListItem; isAdmin: bo
           </>
         )}
       </td>
-      <td className="tabular px-3 py-2.5 text-right">{s && fmtInt(s.solved_any)}</td>
-      <td className="tabular px-3 py-2.5 text-right">{s && fmtDecimal(s.avg_solved)}</td>
-      <td className="tabular px-3 py-2.5 text-right">{s && fmtInt(s.best_global_rank)}</td>
-      <td className="px-5 py-2.5 text-right">
+      <td data-label="Solved ≥ 1" className={cx("tabular px-3 py-2.5 text-right", !s && "stack-hide")}>{s && fmtInt(s.solved_any)}</td>
+      <td data-label="Avg solved" className={cx("tabular px-3 py-2.5 text-right", !s && "stack-hide")}>{s && fmtDecimal(s.avg_solved)}</td>
+      <td data-label="Best rank" className={cx("tabular px-3 py-2.5 text-right", !s && "stack-hide")}>{s && fmtInt(s.best_global_rank)}</td>
+      <td className="stack-full stack-actions px-5 py-2.5 text-right">
         {c.state === "queued" || c.state === "scanning" ? (
           <CancelScanButton slug={c.slug} running={c.state === "scanning"} requestedBy={c.requested_by} cancelRequested={c.cancel_requested} />
         ) : (

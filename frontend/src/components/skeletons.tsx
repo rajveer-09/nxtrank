@@ -101,10 +101,10 @@ function TableCard({ rows = 8, cols = 5, filters = true }: { rows?: number; cols
   );
 }
 
-export function ContestsSkeleton() {
+export function ContestsSkeleton({ title = true }: { title?: boolean }) {
   return (
     <Loading label="Loading contests…">
-      <PageTitle />
+      {title && <PageTitle />}
       <div aria-hidden className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {[0, 1, 2].map((i) => (
           <CardShell key={i} className="flex h-[188px] flex-col gap-3 p-4">

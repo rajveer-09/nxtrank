@@ -52,15 +52,4 @@ export function useIntentPrefetch(role: Role | undefined) {
 }
 
 /** Run `fn` when the browser has nothing else to do; returns a cancel function. */
-export function whenIdle(fn: () => void): () => void {
-  const w = window as Window & {
-    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
-    cancelIdleCallback?: (id: number) => void;
-  };
-  if (w.requestIdleCallback) {
-    const id = w.requestIdleCallback(fn, { timeout: 3000 });
-    return () => w.cancelIdleCallback?.(id);
-  }
-  const id = setTimeout(fn, 1200);
-  return () => clearTimeout(id);
-}
+export { whenIdle } from "./idle";

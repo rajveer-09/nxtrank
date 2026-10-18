@@ -25,6 +25,8 @@ class StudentResult:
     status: Status
     participant: Participant | None = None
     college_rank: int | None = None  # rank among portal students, see _assign_ranks
+    # stored results only: LeetCode penalised this entry after the contest (services/flags.py)
+    flag: dict | None = None  # {"early_rank", "early_score", "early_solved"}
 
 
 _STATUS_ORDER = {s: i for i, s in enumerate(Status)}
@@ -69,7 +71,10 @@ def _assign_ranks(results: list[StudentResult]) -> None:
     (the whole roster, across colleges). Global ranks are unique, so ordering by
     them is a strict order."""
     ranked = sorted(
-        (r for r in results if r.participant), key=lambda r: r.participant.global_rank
+        (r for r in results if r.participant),
+        # contest rank decides; a tie goes to less total time
+        key=lambda r: (r.participant.global_rank,
+                       r.participant.total_time_secs if r.participant.total_time_secs is not None else float("inf")),
     )
     for i, r in enumerate(ranked, start=1):
         r.college_rank = i

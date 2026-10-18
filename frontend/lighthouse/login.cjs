@@ -9,7 +9,7 @@
 module.exports = async (browser, context) => {
   const page = await browser.newPage();
   try {
-    await page.goto(new URL("/", context.url).href, { waitUntil: "networkidle0" });
+    await page.goto(new URL("/", context.url).href, { waitUntil: "networkidle2" });
     const password = await page.$("input[type=password]");
     if (!password) return; // already signed in
     if (!process.env.LHCI_EMAIL || !process.env.LHCI_PASSWORD) throw new Error("set LHCI_EMAIL and LHCI_PASSWORD");

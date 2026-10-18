@@ -7,14 +7,22 @@ total, shown in DevTools) and one JSON log line per API call, read by scripts/sl
 
 import json
 import logging
+import re
 import time
+import uuid
 from contextvars import ContextVar
 from dataclasses import dataclass
 
 from sqlalchemy import Engine, event
 from starlette.datastructures import MutableHeaders
 
+from app.api.errors import body
+from app.request_context import request_id
+
 log = logging.getLogger("app.requests")
+crash_log = logging.getLogger("app.errors")
+
+_GOOD_ID = re.compile(r"[A-Za-z0-9-]{8,64}")
 
 
 @dataclass
@@ -48,9 +56,13 @@ def watch(engine: Engine) -> None:
 
 
 class Observe:
-    """ASGI middleware: Server-Timing header and a log line for every /api request."""
+    """ASGI middleware for every /api request: a request ID (X-Request-ID, in and out),
+    the Server-Timing header, one log line, and a safe 500 when an endpoint crashes.
 
-    QUIET = {"/api/health"}  # polled by the proxy; not worth a line each time
+    Crashes are caught here rather than by FastAPI, whose crash handler runs outside
+    user middleware, where the request ID is already gone."""
+
+    QUIET = {"/api/health", "/api/warm", "/api/worker/wake"}  # polled on a timer; not worth a line each time
 
     def __init__(self, app):
         self.app = app
@@ -60,25 +72,36 @@ class Observe:
         if scope["type"] != "http" or not path.startswith("/api/"):
             return await self.app(scope, receive, send)
 
+        incoming = next((v.decode("latin-1") for k, v in scope.get("headers", ()) if k == b"x-request-id"), "")
+        rid = incoming if _GOOD_ID.fullmatch(incoming) else uuid.uuid4().hex[:16]
         stats = _Stats()
         token = _current.set(stats)
+        rid_token = request_id.set(rid)
         started = time.perf_counter()
         status = 500
+        response_started = False
 
         async def send_with_timing(message):
-            nonlocal status
+            nonlocal status, response_started
             if message["type"] == "http.response.start":
+                response_started = True
                 status = message["status"]
                 total = (time.perf_counter() - started) * 1000
                 db = stats.db * 1000
-                MutableHeaders(scope=message).append(
+                headers = MutableHeaders(scope=message)
+                headers.append(
                     "Server-Timing",
                     f'db;dur={db:.1f};desc="{stats.queries} queries", app;dur={max(0.0, total - db):.1f}, '
                     f"total;dur={total:.1f}")
+                headers["X-Request-ID"] = rid
             await send(message)
 
         try:
             await self.app(scope, receive, send_with_timing)
+        except Exception:
+            crash_log.exception("unhandled error on %s %s", scope.get("method"), path)
+            if not response_started:
+                await _send_crash(send_with_timing, rid)
         finally:
             _current.reset(token)
             if path not in self.QUIET:
@@ -90,4 +113,15 @@ class Observe:
                     "ms": round((time.perf_counter() - started) * 1000, 1),
                     "db_ms": round(stats.db * 1000, 1),
                     "queries": stats.queries,
+                    "rid": rid,
                 }, separators=(",", ":")))
+            request_id.reset(rid_token)
+
+
+async def _send_crash(send, rid: str) -> None:
+    """The reply to a crash: no internals, just a reference the user can quote."""
+    payload = json.dumps(body(500, f"Something went wrong on our side. Reference: {rid}", "internal")).encode()
+    await send({"type": "http.response.start", "status": 500, "headers": [
+        (b"content-type", b"application/json"), (b"content-length", str(len(payload)).encode()),
+        (b"cache-control", b"private, no-store")]})
+    await send({"type": "http.response.body", "body": payload})

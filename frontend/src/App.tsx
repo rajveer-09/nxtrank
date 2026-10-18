@@ -4,6 +4,7 @@
  * Date: 14 October 2026
  */
 import { Suspense, useEffect } from "react";
+import { warmDatabase } from "./api";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useMe } from "./auth";
 import Layout from "./components/Layout";
@@ -12,7 +13,7 @@ import { Button } from "./components/ui";
 import { pages, preloadWhenIdle } from "./routes";
 import { PageSkeleton } from "./components/skeletons";
 
-const { Admin, Analytics, ContestPage, Contests, Login, MyStudents, StudentPage, Students } = pages;
+const { Admin, Analytics, ContestPage, Contests, Guide, Login, MyStudents, StudentPage, Students } = pages;
 
 function Splash() {
   return (
@@ -25,7 +26,24 @@ function Splash() {
   );
 }
 
+/** Back on the tab after a while: the database has probably gone to sleep, so start
+ *  waking it before the page's own requests need it. */
+const AWAY_BEFORE_WARM_MS = 4 * 60_000;
+
+function useWarmOnReturn() {
+  useEffect(() => {
+    let hiddenAt = document.hidden ? Date.now() : 0;
+    const onChange = () => {
+      if (document.hidden) hiddenAt = Date.now();
+      else if (hiddenAt && Date.now() - hiddenAt > AWAY_BEFORE_WARM_MS) warmDatabase();
+    };
+    document.addEventListener("visibilitychange", onChange);
+    return () => document.removeEventListener("visibilitychange", onChange);
+  }, []);
+}
+
 export default function App() {
+  useWarmOnReturn();
   const me = useMe();
   const role = me.data?.role;
 
@@ -33,7 +51,7 @@ export default function App() {
   useEffect(() => {
     if (!role) return;
     preloadWhenIdle([
-      Contests.preload, ContestPage.preload, Analytics.preload, Students.preload, StudentPage.preload,
+      Contests.preload, ContestPage.preload, Analytics.preload, Students.preload, StudentPage.preload, Guide.preload,
       ...(role === "admin" ? [Admin.preload] : []),
       ...(role !== "viewer" ? [MyStudents.preload] : []),
     ]);
@@ -71,6 +89,7 @@ export default function App() {
         <Route path="/analytics" element={<Analytics />} />
         <Route path="/students" element={<Students />} />
         <Route path="/students/:id" element={<StudentPage />} />
+        <Route path="/guide" element={<Guide />} />
         {me.data.role === "admin" && <Route path="/admin/*" element={<Admin />} />}
         {(me.data.role === "admin" || me.data.role === "instructor") && (
           <Route path="/my-students" element={<MyStudents role={me.data.role} name={me.data.name} />} />

@@ -16,11 +16,13 @@ from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import Headers, MutableHeaders
 from starlette.middleware.sessions import SessionMiddleware
 
-from app.api import routes_admin, routes_auth, routes_data
+from app.api import errors, routes_admin, routes_auth, routes_data, routes_ops
 from app.api.observe import Observe, watch
+from app.api.security import OriginCheck, SecurityHeaders, page_policy
 from app.config import Settings, get_settings
 from app.db.migrate import upgrade
 from app.db.session import make_engine, make_session_factory
+from app.services.notify import Notifier, install_crash_alerts
 
 log = logging.getLogger(__name__)
 
@@ -33,8 +35,10 @@ def create_app(settings: Settings | None = None, session_factory=None) -> FastAP
         upgrade(settings.database_url)
         session_factory = make_session_factory(make_engine(settings.database_url))
 
-    app = FastAPI(title="NxtRank API", docs_url="/api/docs",
-                  openapi_url="/api/openapi.json", redoc_url=None)
+    # the interactive API docs list every route: handy in development, not in production
+    docs = not settings.production
+    app = FastAPI(title="NxtRank API", docs_url="/api/docs" if docs else None,
+                  openapi_url="/api/openapi.json" if docs else None, redoc_url=None)
     app.state.settings = settings
     app.state.session_factory = session_factory
     watch(session_factory.kw["bind"])  # per-request query counts and database time
@@ -43,16 +47,22 @@ def create_app(settings: Settings | None = None, session_factory=None) -> FastAP
     if not secret:
         log.warning("SECRET_KEY not set: using a random key, logins reset when the API restarts")
         secret = secrets.token_urlsafe(32)
+    app.add_middleware(OriginCheck, allowed=settings.allowed_origins)
     app.add_middleware(
         SessionMiddleware, secret_key=secret, session_cookie="lcdash_session",
         max_age=SESSION_MAX_AGE, same_site="lax", https_only=settings.cookie_secure,
     )
 
+    errors.install(app)
+    install_crash_alerts(Notifier.from_settings(settings))  # crashes reach Slack / Telegram too
     app.add_middleware(ApiNoStore)
+    app.add_middleware(SecurityHeaders, https=settings.cookie_secure,
+                       page_csp=page_policy(settings.frontend_dist / "index.html"))
     app.add_middleware(Observe)  # outermost: times everything below it
     app.include_router(routes_auth.router)
     app.include_router(routes_data.router)
     app.include_router(routes_admin.router)
+    app.include_router(routes_ops.router)
 
     @app.get("/api/health", include_in_schema=False)
     def health() -> dict:

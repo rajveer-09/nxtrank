@@ -118,7 +118,9 @@ class ScanRun(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     contest_slug: Mapped[str] = mapped_column(String(100), index=True)
     kind: Mapped[str] = mapped_column(String(16), default="provisional")  # provisional (early) | final
-    status: Mapped[str] = mapped_column(String(16), default="running")  # running|complete|failed|cancelled
+    # running | complete | failed | cancelled, and for manual scans waiting for an admin:
+    # review (a draft) -> complete (published) or discarded
+    status: Mapped[str] = mapped_column(String(16), default="running")
     pages_total: Mapped[int | None] = mapped_column(Integer)
     pages_done: Mapped[int | None] = mapped_column(Integer)  # progress while running
     # set from the dashboard; the worker checks it while scanning and stops
@@ -129,6 +131,23 @@ class ScanRun(Base):
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
+    reviewed_by: Mapped[str | None] = mapped_column(String(120))
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # published | discarded | replaced | outdated | expired
+    review_decision: Mapped[str | None] = mapped_column(String(16))
+
+
+class ScanDraft(Base):
+    """A manual scan's results, waiting for an admin to add them to the dashboard. Holds
+    exactly the rows a direct scan would have written (see services/scans.py)."""
+
+    __tablename__ = "scan_drafts"
+
+    run_id: Mapped[int] = mapped_column(ForeignKey("scan_runs.id", ondelete="CASCADE"), primary_key=True)
+    contest_slug: Mapped[str] = mapped_column(String(100), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+    contest: Mapped[dict] = mapped_column(JSON)  # title, start, duration, questions, ...
+    rows: Mapped[list] = mapped_column(JSON)  # one per student, the Result columns + problems
 
 
 class Result(Base):
@@ -152,6 +171,13 @@ class Result(Base):
     score: Mapped[int | None] = mapped_column(Integer)
     solved_count: Mapped[int | None] = mapped_column(Integer)
     total_time_secs: Mapped[int | None] = mapped_column(Integer)  # includes penalties
+    # "penalised": on an earlier scan this student scored, and on a later one LeetCode had
+    # removed them, zeroed their score or moved them to the bottom (services/flags.py).
+    # early_*: what that earlier scan showed.
+    flag: Mapped[str | None] = mapped_column(String(20))
+    early_rank: Mapped[int | None] = mapped_column(Integer)
+    early_score: Mapped[int | None] = mapped_column(Integer)
+    early_solved: Mapped[int | None] = mapped_column(Integer)
 
     student: Mapped[Student] = relationship()
     problems: Mapped[list["ProblemResult"]] = relationship(
@@ -339,3 +365,79 @@ class CohortStats(Base):
 
     win: Mapped[int] = mapped_column(Integer, primary_key=True)
     payload: Mapped[dict] = mapped_column(JSON)
+
+
+class LoginFailure(Base):
+    """One failed sign-in, kept for the throttle window. In the database so every API
+    process sees the same count and a restart doesn't reset it."""
+
+    __tablename__ = "login_failures"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(200), index=True)  # "<ip>|<username>"
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+
+class AuditEvent(Base):
+    """Who did what, for actions that don't change a row of their own (e.g. an admin
+    viewing the dashboard as an instructor)."""
+
+    __tablename__ = "audit_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    actor: Mapped[str] = mapped_column(String(120))
+    action: Mapped[str] = mapped_column(String(40))  # e.g. "view_as.start"
+    target: Mapped[str | None] = mapped_column(String(200))
+    detail: Mapped[str | None] = mapped_column(Text)
+
+
+class QuestionTagSource(Base):
+    """A question's tags as one source last gave them: LeetCode's official topic tags, or
+    the topics community solutions use (with how many solutions mention each)."""
+
+    __tablename__ = "question_tag_sources"
+
+    question_slug: Mapped[str] = mapped_column(String(200), primary_key=True)
+    source: Mapped[str] = mapped_column(String(10), primary_key=True)  # official | community
+    tag_slug: Mapped[str] = mapped_column(String(100), primary_key=True)
+    tag_name: Mapped[str] = mapped_column(String(100))
+    mentions: Mapped[int | None] = mapped_column(Integer)  # community only
+    fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class QuestionTagStatus(Base):
+    """Per question: when each source was last asked, and which tags are in use."""
+
+    __tablename__ = "question_tag_status"
+
+    question_slug: Mapped[str] = mapped_column(String(200), primary_key=True)
+    official_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    official_found: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    community_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    community_mentions: Mapped[int | None] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(12), default="pending")  # official|provisional|insufficient|pending
+    effective_hash: Mapped[str | None] = mapped_column(String(40))
+    state_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class QuestionTag(Base):
+    """The tags topic stats use: one source per question (official wins), derived in
+    services/tags.py, so a question never counts twice under a topic."""
+
+    __tablename__ = "question_tags"
+
+    question_slug: Mapped[str] = mapped_column(String(200), primary_key=True)
+    tag_slug: Mapped[str] = mapped_column(String(100), primary_key=True)
+    tag_name: Mapped[str] = mapped_column(String(100))
+    source: Mapped[str] = mapped_column(String(10))  # official | community
+
+
+class LeetCodeTopic(Base):
+    """LeetCode's topic list: the only topics provisional tags may use (filled by the
+    migration; official tags seen later also count, see services/tags.py)."""
+
+    __tablename__ = "leetcode_topics"
+
+    slug: Mapped[str] = mapped_column(String(100), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))

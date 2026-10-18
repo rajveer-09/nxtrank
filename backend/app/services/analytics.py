@@ -27,7 +27,13 @@ from app.services import summaries, vcache
 
 PARTICIPATED = ("solved", "zero")
 MAX_FILTER_VALUES = 40
-TREND_THRESHOLD = 0.5
+TREND_THRESHOLD = 0.5  # problems per contest: improving / declining beyond this
+TREND_K = 4  # trend: the last (up to) 4 attended contests vs the 4 before
+CONSISTENCY_MIN_CONTESTS = 3  # consistency needs this many scanned contests
+ATTENDANCE_WEIGHT = 0.6  # consistency = 60% attendance + 40% stability
+STABILITY_WEIGHT = 0.4
+STD_CAP = 1.5  # stability = 1 - min(1, std-dev of problems solved / 1.5)
+CONSISTENCY_LABELS = ((80, "Very consistent"), (60, "Consistent"), (40, "Irregular"), (0, "Inconsistent"))
 ABSENT_STREAK_ALERT = 3
 TOP_N = 100  # colleges are compared by how many students they have in the portal's top 100
 MEDALS = 3
@@ -109,7 +115,7 @@ class Raw:
     @classmethod
     def from_row(cls, row) -> "Raw":
         """From a student_stats row or a live summaries.student_select() row."""
-        values = dict(zip(summaries.STUDENT_COLUMNS, row))
+        values = dict(zip(summaries.STUDENT_COLUMNS, row, strict=True))
         values.pop("student_id")
         values["questions"] = {k: tuple(v) for k, v in (values["questions"] or {}).items()}
         return cls(**values)
@@ -177,29 +183,23 @@ def _scanned_contests(session: Session) -> list[Contest]:
 
 
 def consistency_score(n_scanned: int, n_attended: int, solved_std: float | None) -> int | None:
-    if n_scanned < 3:
+    if n_scanned < CONSISTENCY_MIN_CONTESTS:
         return None
     attendance = n_attended / n_scanned
-    stability = 1 - min(1.0, solved_std / 1.5) if (n_attended >= 2 and solved_std is not None) else 0.0
-    return round(100 * (0.6 * attendance + 0.4 * stability))
+    stability = 1 - min(1.0, solved_std / STD_CAP) if (n_attended >= 2 and solved_std is not None) else 0.0
+    return round(100 * (ATTENDANCE_WEIGHT * attendance + STABILITY_WEIGHT * stability))
 
 
 def consistency_label(score: int | None) -> str | None:
     if score is None:
         return None
-    if score >= 80:
-        return "Very consistent"
-    if score >= 60:
-        return "Consistent"
-    if score >= 40:
-        return "Irregular"
-    return "Inconsistent"
+    return next(label for floor, label in CONSISTENCY_LABELS if score >= floor)
 
 
 def solved_trend(values: list[int]) -> float | None:
-    if len(values) < 4:
+    if len(values) < TREND_K:
         return None
-    k = min(4, len(values) // 2)
+    k = min(TREND_K, len(values) // 2)
     return _mean(values[-k:]) - _mean(values[-2 * k:-k])
 
 

@@ -16,7 +16,7 @@ export default function StudentPage() {
   const student = useQuery({ ...studentQuery(id), enabled: Number.isFinite(id) });
 
   if (student.isPending) return <StudentSkeleton />;
-  if (student.isError) return <ErrorBox error={student.error} />;
+  if (student.isError) return <ErrorBox error={student.error} onRetry={() => student.refetch()} />;
   const s = student.data;
   const labels = [...new Set(s.history.flatMap((h) => h.questions))].sort();
 
