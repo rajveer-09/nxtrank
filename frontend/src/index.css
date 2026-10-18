@@ -21,9 +21,17 @@
   --fg: #ffffff; /* overlay base: hairlines and hover washes are fg at low opacity */
   --ink: #ececee;
   --ink-2: #a1a6ae;
-  --ink-3: #7a8089;
+  --ink-3: #90969f; /* 4.5:1 on every surface (WCAG AA) */
   --accent: #4f8cff;
   --accent-hover: #6299ff;
+  --btn-primary: #2f6de6; /* darker than the accent, so white text reads at 4.5:1 */
+  /* chart series (categorical, in this fixed order; validated for the dark card surface) */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  --series-other: #6b7079;
+  --btn-primary-hover: #2563eb;
   --accent-ink: #7eaaff; /* accent as text */
   --accent-ink-hover: #a5c3ff;
   --accent-soft: rgb(79 140 255 / 0.14);
@@ -70,9 +78,16 @@
   --fg: #0b0d12;
   --ink: #12151b;
   --ink-2: #4a505b;
-  --ink-3: #737a86;
+  --ink-3: #636a75; /* 4.5:1 on every surface (WCAG AA) */
   --accent: #3d7cf5;
   --accent-hover: #2f6de6;
+  --btn-primary: #2563eb;
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  --series-other: #a3a8b0;
+  --btn-primary-hover: #1f5fd6;
   --accent-ink: #2563d9;
   --accent-ink-hover: #1a4fb8;
   --accent-soft: rgb(61 124 245 / 0.1);
@@ -120,6 +135,8 @@
   --color-ink-3: var(--ink-3);
   --color-accent: var(--accent);
   --color-accent-hover: var(--accent-hover);
+  --color-btn-primary: var(--btn-primary);
+  --color-btn-primary-hover: var(--btn-primary-hover);
   --color-accent-ink: var(--accent-ink);
   --color-accent-ink-hover: var(--accent-ink-hover);
   --color-accent-soft: var(--accent-soft);
@@ -143,11 +160,6 @@
 @layer base {
   html {
     background: radial-gradient(1100px 420px at 50% -160px, var(--page-glow), transparent 70%) no-repeat, var(--bg);
-  }
-  /* theme switch: colours cross-fade instead of snapping */
-  html.theme-transition,
-  html.theme-transition * {
-    transition: background-color 280ms ease, border-color 280ms ease, color 280ms ease, fill 280ms ease, stroke 280ms ease !important;
   }
   body {
     background: transparent;
@@ -598,6 +610,11 @@ input[type="search"]::-webkit-search-cancel-button {
 .dialog-panel { animation: dialog-lift 200ms cubic-bezier(0.2, 0.8, 0.2, 1); }
 @keyframes dialog-fade { from { opacity: 0; } }
 @keyframes dialog-lift { from { opacity: 0; transform: translateY(8px) scale(0.98); } }
+/* phones: the sheet slides up from the bottom */
+@media (max-width: 639px) {
+  .dialog-panel { animation: dialog-sheet 240ms cubic-bezier(0.2, 0.8, 0.2, 1); padding-bottom: env(safe-area-inset-bottom); }
+  @keyframes dialog-sheet { from { transform: translateY(100%); } }
+}
 @media (prefers-reduced-motion: reduce) { .dialog-backdrop, .dialog-panel { animation: none; } }
 
 /* ---- sign in / sign out ------------------------------------------------------------- */
@@ -619,8 +636,53 @@ input[type="search"]::-webkit-search-cancel-button {
 /* signing out: the dashboard fades away */
 .app-leaving #root { transition: opacity 240ms ease, filter 240ms ease; opacity: 0; filter: blur(2px); }
 
+/* theme switch (theme.ts): one quick, even cross-fade of the whole page */
+::view-transition-old(root),
+::view-transition-new(root) { animation-duration: 180ms; animation-timing-function: ease-out; }
+
+/* the phone tab bar: the header's glassy surface, at the bottom */
+.bottom-nav { background: color-mix(in srgb, var(--nav) 88%, transparent); backdrop-filter: saturate(1.4) blur(12px); }
+
+/* Lists as cards on phones: add .stack-table to the <table>, data-label to each cell
+   (its column name), .stack-full to cells that take the whole width. */
+@media (max-width: 639px) {
+  .stack-table, .stack-table tbody { display: block; width: 100%; }
+  .stack-table thead { display: none; }
+  .stack-table tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.625rem 1rem; padding: 0.875rem 1rem; }
+  .stack-table td { display: block; min-width: 0; padding: 0 !important; text-align: left !important; white-space: normal !important; }
+  .stack-table td.stack-full { grid-column: 1 / -1; }
+  .stack-table td.stack-hide { display: none; }
+  .stack-table td.stack-first { order: -1; } /* e.g. the student's name before their rank */
+  .stack-table tr[aria-hidden] { display: block; padding: 0; } /* virtual-list spacers */
+  .stack-table td.stack-actions:empty { display: none; }
+  .stack-table td.stack-actions { display: flex; flex-wrap: wrap; gap: 0.25rem; justify-content: flex-start; }
+  .stack-table td[data-label]::before {
+    content: attr(data-label); display: block; margin-bottom: 0.125rem;
+    font-size: 11px; font-weight: 500; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-3);
+  }
+}
+
+/* the Guide's header: a soft wash of the accent */
+.guide-hero { background: radial-gradient(600px 220px at 0% 0%, var(--accent-soft), transparent 70%), var(--surface); }
+
+/* the admin side menu: a raised panel in light mode, flat in dark */
+.admin-menu, .guide-toc { box-shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 12px 32px -18px rgb(16 24 40 / 0.18); }
+:root:not([data-theme="light"]) .admin-menu,
+:root:not([data-theme="light"]) .guide-toc { box-shadow: none; }
+
+/* a row that was just saved */
+.row-flash { animation: row-flash 2s ease-out; }
+@keyframes row-flash { 0%, 30% { background-color: var(--accent-soft); } }
+
 /* notices on the login card */
 .notice { animation: app-enter 300ms ease-out both; }
+/* the "Signed out" toast: rises in, waits, fades (2.5 s, matching the timer that removes it) */
+.toast { animation: toast-life 2500ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+@keyframes toast-life {
+  0% { opacity: 0; transform: translateY(8px); }
+  10%, 80% { opacity: 1; transform: none; }
+  100% { opacity: 0; transform: translateY(4px); }
+}
 
 /* a spinner inside buttons */
 .btn-spinner {
@@ -649,7 +711,7 @@ input:-webkit-autofill:focus {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shake, .login-exit, .app-enter, .notice, .splash, .tick-draw { animation: none; }
+  .shake, .login-exit, .app-enter, .notice, .toast, .splash, .tick-draw { animation: none; }
   .tick-draw { stroke-dashoffset: 0; }
   .splash-bar::after { animation: none; }
   .app-leaving #root { transition: none; }

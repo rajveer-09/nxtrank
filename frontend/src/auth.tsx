@@ -6,7 +6,7 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { ApiError, api, type Me } from "./api";
+import { ApiError, api, instructorsApi, type Me } from "./api";
 
 export function useMe() {
   return useQuery<Me | null>({
@@ -61,4 +61,34 @@ export function useLogout() {
     root.classList.remove("app-leaving");
   }
   return { logout, leaving };
+}
+
+/** Admins: start or end "view as instructor". Each switch swaps who's signed in, so
+ *  everyone else's cached data is dropped, as on sign-out. */
+export function useViewAs() {
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  async function switchTo(load: () => Promise<Me>, to: string) {
+    if (pending) return;
+    setPending(true);
+    setError(null);
+    try {
+      const me = await load();
+      qc.setQueryData(["me"], me);
+      qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "me" });
+      navigate(to, { replace: true });
+    } catch (e) {
+      setError(e);
+    } finally {
+      setPending(false);
+    }
+  }
+  return {
+    start: (id: number) => switchTo(() => instructorsApi.viewAs(id), "/my-students"),
+    stop: (backTo = "/admin/instructors") => switchTo(instructorsApi.returnToAdmin, backTo),
+    pending,
+    error,
+  };
 }

@@ -124,8 +124,16 @@ def apply_profile_ranks(session: Session, slugs: list[str] | None = None) -> int
             changed.add(result.contest_slug)
             n += 1
     for slug in changed:
-        ranked = session.scalars(select(Result).where(Result.contest_slug == slug, Result.global_rank.is_not(None))
-                                 .order_by(Result.global_rank, Result.student_id)).all()
-        for i, r in enumerate(ranked, start=1):
-            r.college_rank = i
+        rerank(session, slug)
     return n
+
+
+def rerank(session: Session, slug: str) -> None:
+    """College ranks for a contest: the portal's participants numbered 1, 2, 3, ... by
+    contest rank, a tie going to less total time. Does not commit."""
+    session.flush()
+    ranked = session.scalars(select(Result).where(Result.contest_slug == slug, Result.global_rank.is_not(None))
+                             .order_by(Result.global_rank, Result.total_time_secs.is_(None),
+                                       Result.total_time_secs, Result.student_id)).all()
+    for i, r in enumerate(ranked, start=1):
+        r.college_rank = i

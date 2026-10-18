@@ -25,7 +25,8 @@ DATA_VERSION = "data_version"
 
 RESULT_TABLES = {"results", "problem_results", "contests"}
 # changes here don't alter any numbers, but they change what some pages show
-VERSION_TABLES = {"students", "colleges", "rating_history", "instructor_colleges", "instructor_students", "users"}
+VERSION_TABLES = {"students", "colleges", "rating_history", "instructor_colleges", "instructor_students", "users",
+                  "question_tags"}  # effective topic tags: topic stats change
 COHORT_COLUMNS = {"active", "college_id"}  # student columns that move them between cohorts
 
 # ---- SQL ---------------------------------------------------------------------------

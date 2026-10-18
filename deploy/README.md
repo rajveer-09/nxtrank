@@ -19,6 +19,55 @@ Browser ──HTTPS──▶ Caddy ──┬── /assets, index.html  (fronten
 | `backup.sh`, `restore-drill.sh`, `copy-to-neon.sh` | stay here | Nightly dump, monthly restore drill, weekly off-site copy |
 | `dashboard-{backup,restore-drill,neon-copy}.{service,timer}` | `/etc/systemd/system/` | Schedule those three |
 
+The VM setup is further down. The dashboard currently runs on free hosted services
+instead, and the runbook below is for that setup.
+
+## Runbook: Render + Neon (current setup)
+
+| Part | Where |
+|---|---|
+| Website and API | Render web service `nxtrank-nxtwave` (branch `master`); staging service on branch `staging` |
+| Database | Neon project "NxtRank Production": branch `production`, plus a staging branch |
+| Worker (scans) | A laptop on a home connection (`python -m app.cli worker`), because LeetCode's Cloudflare blocks cloud servers |
+| Uptime | UptimeRobot checks `/api/health` every 5 minutes |
+| Backups | GitHub Actions workflow **Backup**, nightly at 02:00 IST |
+
+**Render environment variables (production):**
+- `DATABASE_URL`, `SECRET_KEY`;
+- `COOKIE_SECURE=true`;
+- `APP_ENV=production` (hides `/api/docs`);
+- optionally `SLACK_WEBHOOK_URL` or `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`, so API crashes and worker problems are sent as alerts.
+
+Staging uses `APP_ENV=staging`.
+
+### Backups
+- **Setting up (once):** add two repository secrets under GitHub → Settings → Secrets and variables → Actions:
+  - `BACKUP_DATABASE_URL`: production's connection string;
+  - `BACKUP_PASSPHRASE`: at least 20 random characters. **Store this passphrase in a password manager as well. Without it, a backup can't be opened.**
+  - Then run the workflow once by hand: Actions → Backup → Run workflow, with "restore check" ticked.
+- **What it does:**
+  - each night it takes a `pg_dump`, checks that the dump can be read, encrypts it (GPG, AES-256) and keeps it as a run artifact for 7 days;
+  - on the 1st of each month it also restores the dump into a scratch Postgres and compares every table's row count with production;
+  - a failed run sends GitHub's usual failure email.
+- **Restoring:**
+  1. Download the artifact from the run you want, then decrypt it: `gpg --decrypt nxtrank-<stamp>.dump.gpg > nxtrank.dump`.
+  2. Safest: in Neon, create a new branch and restore into it first, check it, and only then point Render at it (or restore into `production`).
+  3. Stop the worker on the laptop.
+  4. Restore: `pg_restore --clean --if-exists --no-owner --no-privileges -d "<direct connection string>" nxtrank.dump`.
+  5. Start the worker again.
+  6. Neon also keeps its own history, which can restore the branch to any moment in its restore window.
+
+### When something goes wrong
+| Symptom | What to do |
+|---|---|
+| A user reports an error with a "Reference: abc123…" | Search Render's logs for that ID. The crash's full traceback, and the request's JSON line (`"rid"`), carry it. |
+| The site doesn't open | Render free services sleep after 15 minutes idle, and the first visit takes about 30 to 60 seconds. If it stays down, check Render → Events and Logs, and UptimeRobot. |
+| "Worker isn't running" banner | Start it on the laptop: `cd backend && .venv\Scripts\python -m app.cli worker`. A second copy started by mistake waits rather than scanning twice ("another worker … is running"). |
+| Scans fail with "blocked" | Cloudflare is blocking the network the worker is on. Run it from a home connection, or set `PROXY_URL` to a residential proxy. |
+| Neon says compute hours are used up | The database is paused until the month resets. Lower the awake window (cron-job.org) or upgrade Neon; data is not lost. |
+| "too many failed logins" | Shared across processes, and clears 15 minutes after the last failed try. |
+| A password or the database URL leaked | Rotate it in Neon or the dashboard; update Render, `backend/.env` on the laptop and the `BACKUP_DATABASE_URL` secret. Changing `SECRET_KEY` signs everyone out. |
+
 ## First install (Ubuntu 24.04)
 
 ```bash

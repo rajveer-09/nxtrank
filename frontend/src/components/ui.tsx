@@ -23,7 +23,7 @@ import {
   type SelectHTMLAttributes,
 } from "react";
 import { createPortal } from "react-dom";
-import type { ContestState, HandleStatus, ResultStatus } from "../api";
+import { ApiError, type ContestState, type HandleStatus, type ResultStatus } from "../api";
 
 export function cx(...classes: (string | false | null | undefined)[]) {
   return classes.filter(Boolean).join(" ");
@@ -53,14 +53,14 @@ const buttonBase =
   "disabled:pointer-events-none disabled:opacity-45";
 
 const buttonVariant = {
-  primary: "bg-accent text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_2px_rgb(0_0_0/0.4)] hover:bg-accent-hover active:bg-accent-hover",
+  primary: "bg-btn-primary text-white shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_2px_rgb(0_0_0/0.4)] hover:bg-btn-primary-hover active:bg-btn-primary-hover",
   secondary: "border border-border bg-(--btn-bg) text-ink shadow-(--btn-shadow) hover:border-border-strong hover:bg-(--btn-bg-hover)",
   ghost: "text-ink-2 hover:bg-fg/5 hover:text-ink",
 };
 
 const buttonSize = {
-  sm: "h-7 px-2.5 text-xs",
-  md: "h-8 px-3 text-[13px]",
+  sm: "h-7 px-2.5 text-xs pointer-coarse:h-10 pointer-coarse:px-3.5", // touch screens: a 40px target
+  md: "h-8 px-3 text-[13px] pointer-coarse:h-10",
   lg: "h-9 px-4 text-[13px]",
 };
 
@@ -603,15 +603,41 @@ export function Spinner({ label = "Loading…" }: { label?: string }) {
   );
 }
 
-export function ErrorBox({ error }: { error: unknown }) {
-  const message = error instanceof Error ? error.message : String(error);
+/** What to tell the person about a failed request. The server's own text is kept for
+ *  4xx errors (it says what to fix); crashes and outages get a calm message plus the
+ *  reference that finds the request in the server's log. */
+export function describeError(error: unknown): { message: string; reference: string | null } {
+  if (!(error instanceof ApiError)) return { message: error instanceof Error ? error.message : String(error), reference: null };
+  const reference = error.requestId;
+  if (error.status === 0) return { message: "You're offline or the server can't be reached. Check your connection and try again.", reference: null };
+  if (error.status === 401) return { message: "Your session has ended. Sign in again to continue.", reference: null };
+  if (error.status === 403) return { message: error.message && error.message !== "Forbidden" ? error.message : "You don't have access to this.", reference: null };
+  if (error.status === 404) return { message: error.message && error.message !== "Not Found" ? capitalise(error.message) + "." : "This page or item doesn't exist (any more).", reference: null };
+  if (error.status === 429) return { message: error.message || "Too many attempts. Wait a moment and try again.", reference: null };
+  if (error.code === "leetcode_blocked" || error.code === "upstream") return { message: error.message, reference };
+  if (error.status >= 500) return { message: "Something went wrong on our side. Try again in a moment; if it keeps happening, share the reference below.", reference };
+  return { message: error.message, reference: null };
+}
+
+const capitalise = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+export function ErrorBox({ error, onRetry }: { error: unknown; onRetry?: () => void }) {
+  const { message, reference } = describeError(error);
   return (
     <div role="alert" className="flex items-start gap-2.5 rounded-md border border-critical/30 bg-critical/8 px-3.5 py-2.5 text-[13px] text-critical-ink">
       <svg aria-hidden viewBox="0 0 16 16" className="mt-0.5 h-4 w-4 shrink-0 text-critical">
         <path d="M8 1.5 15 14H1L8 1.5Z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
         <path d="M8 6v3.5M8 11.5v.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
       </svg>
-      <span>{message}</span>
+      <span className="min-w-0 flex-1">
+        {message}
+        {reference && <span className="mt-0.5 block font-mono text-[11.5px] opacity-75">Reference: {reference}</span>}
+      </span>
+      {onRetry && (
+        <button type="button" onClick={onRetry} className="ripple -my-0.5 shrink-0 rounded px-2 py-0.5 font-medium underline-offset-2 hover:underline">
+          Try again
+        </button>
+      )}
     </div>
   );
 }
@@ -643,32 +669,81 @@ export function Dialog({
   xl?: boolean;
 }) {
   const titleId = useId();
+  useModal(open, busy, onClose);
+  if (!open) return null;
+  return createPortal(
+    <ModalFrame onClose={onClose} busy={busy} labelledBy={titleId} size={xl ? "xl" : wide ? "wide" : "md"}>
+      <div className="shrink-0 px-5 pb-1 pt-5">
+        <h2 id={titleId} className="text-base font-semibold tracking-tight text-ink">
+          {title}
+        </h2>
+      </div>
+      {/* only the middle scrolls: the title and the buttons stay in view */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3 text-[13px] text-ink-2">{children}</div>
+      <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-fg/[0.06] bg-fg/[0.02] px-5 py-3">{footer}</div>
+    </ModalFrame>,
+    document.body,
+  );
+}
+
+/** Escape closes, the page behind doesn't scroll, and focus returns where it was. */
+function useModal(open: boolean, busy: boolean, onClose: () => void) {
   useEffect(() => {
     if (!open) return;
+    const before = document.activeElement as HTMLElement | null;
     const onKey = (e: globalThis.KeyboardEvent) => {
       if (e.key === "Escape" && !busy) onClose();
     };
     const overflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden"; // the page behind doesn't scroll
+    document.body.style.overflow = "hidden";
     window.addEventListener("keydown", onKey);
     return () => {
       window.removeEventListener("keydown", onKey);
       document.body.style.overflow = overflow;
+      before?.focus?.({ preventScroll: true });
     };
   }, [open, busy, onClose]);
+}
+
+/** The backdrop and panel every pop-up shares: centred on larger screens, a sheet from
+ *  the bottom on phones, never taller than the screen. */
+function ModalFrame({ onClose, busy, labelledBy, label, size, children }: { onClose: () => void; busy: boolean; labelledBy?: string; label?: string; size: "md" | "wide" | "xl"; children: ReactNode }) {
+  return (
+    <div
+      className="dialog-backdrop fixed inset-0 z-50 flex items-end justify-center bg-black/45 backdrop-blur-[2px] sm:items-center sm:p-4"
+      onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={labelledBy}
+        aria-label={label}
+        className={cx(
+          "dialog-panel flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-2xl bg-surface shadow-(--shadow-pop) ring-1 ring-inset ring-fg/10 sm:max-h-[calc(100dvh-2rem)] sm:rounded-xl",
+          size === "xl" ? "sm:max-w-5xl" : size === "wide" ? "sm:max-w-2xl" : "sm:max-w-md",
+        )}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+/** A form in a pop-up (add / edit), opened over the page where you clicked, with the
+ *  first field focused. The form brings its own heading and buttons. */
+export function Modal({ open, onClose, label, busy = false, wide = true, children }: { open: boolean; onClose: () => void; label: string; busy?: boolean; wide?: boolean; children: ReactNode }) {
+  const body = useRef<HTMLDivElement>(null);
+  useModal(open, busy, onClose);
+  useEffect(() => {
+    if (open) body.current?.querySelector<HTMLElement>("input:not([type=hidden]), select, textarea")?.focus({ preventScroll: true });
+  }, [open]);
   if (!open) return null;
   return createPortal(
-    <div className="dialog-backdrop fixed inset-0 z-50 grid place-items-center bg-black/45 p-4 backdrop-blur-[2px]" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
-      <div role="dialog" aria-modal="true" aria-labelledby={titleId} className={cx("dialog-panel w-full overflow-hidden rounded-xl bg-surface shadow-(--shadow-pop) ring-1 ring-inset ring-fg/10", xl ? "max-w-5xl" : wide ? "max-w-2xl" : "max-w-md")}>
-        <div className="px-5 pb-1 pt-5">
-          <h2 id={titleId} className="text-base font-semibold tracking-tight text-ink">
-            {title}
-          </h2>
-        </div>
-        <div className="px-5 py-3 text-[13px] text-ink-2">{children}</div>
-        <div className="flex justify-end gap-2 border-t border-fg/[0.06] bg-fg/[0.02] px-5 py-3">{footer}</div>
+    <ModalFrame onClose={onClose} busy={busy} label={label} size={wide ? "wide" : "md"}>
+      <div ref={body} className="min-h-0 flex-1 overflow-y-auto">
+        {children}
       </div>
-    </div>,
+    </ModalFrame>,
     document.body,
   );
 }
@@ -742,4 +817,25 @@ export function Consequences({ items }: { items: ReactNode[] }) {
       ))}
     </ul>
   );
+}
+
+/** The id of a row that just changed, for 2 seconds (its row briefly highlights). */
+export function useFlash(ms = 2000): [number | null, (id: number) => void] {
+  const [id, setId] = useState<number | null>(null);
+  useEffect(() => {
+    if (id == null) return;
+    const t = setTimeout(() => setId(null), ms);
+    return () => clearTimeout(t);
+  }, [id, ms]);
+  return [id, setId];
+}
+
+/** After paging a long table: bring its top back into view (under the sticky header)
+ *  if it's scrolled away, so the new page starts at its first row, not mid-list. */
+export function scrollToTopOf(el: HTMLElement | null, offset = 76) {
+  if (!el) return;
+  const top = el.getBoundingClientRect().top;
+  if (top >= offset && top < window.innerHeight) return; // already in view
+  const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  window.scrollTo({ top: Math.max(0, top + window.scrollY - offset), behavior: reduce ? "auto" : "smooth" });
 }

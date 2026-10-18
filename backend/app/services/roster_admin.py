@@ -244,7 +244,7 @@ def import_students(session: Session, rows: list[list[str]], *, actor: str, via:
     try:
         parsed, _ = roster.parse_roster(rows, source)
     except roster.RosterError as e:
-        raise RosterEditError(str(e).replace(f"{source}: ", ""))
+        raise RosterEditError(str(e).replace(f"{source}: ", "")) from e
     if not any(s.roll_no for s in parsed):
         raise RosterEditError("no roll numbers found: add a column named Roll No (see the template)")
 

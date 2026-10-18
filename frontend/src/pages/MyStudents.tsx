@@ -5,7 +5,7 @@
  */
 import { useQuery } from "@tanstack/react-query";
 import { useSearchParams } from "react-router-dom";
-import { analyticsApi, instructorsApi, type Role } from "../api";
+import { analyticsApi, instructorsApi, topicsApi, type Role } from "../api";
 import { Card, Empty, ErrorBox, Select } from "../components/ui";
 import { AnalyticsView } from "./Analytics";
 import { PageSkeleton } from "../components/skeletons";
@@ -20,6 +20,7 @@ export default function MyStudents({ role, name }: { role: Role; name: string | 
       queryKey={["instructor-analytics", "me"]}
       fetch={(f) => analyticsApi.instructor(f)}
       fetchStudents={(f, page) => analyticsApi.instructorStudents(f, page)}
+      fetchTopics={(f) => topicsApi.instructor(f)}
     />
   );
 }
@@ -31,12 +32,15 @@ function AdminPreview() {
   const current = list.data?.instructors.find((i) => i.id === id);
 
   if (list.isPending) return <PageSkeleton />;
-  if (list.isError) return <ErrorBox error={list.error} />;
+  if (list.isError) return <ErrorBox error={list.error} onRetry={() => list.refetch()} />;
   if (!current)
     return (
-      <Card>
-        <Empty>No instructors yet. Add one on the Admin page.</Empty>
-      </Card>
+      <div className="flex flex-col gap-4">
+        <h1 className="text-xl font-semibold tracking-tight text-ink">My students</h1>
+        <Card>
+          <Empty>No instructors yet. Add one on the Admin page.</Empty>
+        </Card>
+      </div>
     );
 
   return (
@@ -47,6 +51,7 @@ function AdminPreview() {
       queryKey={["instructor-analytics", current.id]}
       fetch={(f) => analyticsApi.instructor(f, current.id)}
       fetchStudents={(f, page) => analyticsApi.instructorStudents(f, page, current.id)}
+      fetchTopics={(f) => topicsApi.instructor(f, current.id)}
       actions={
         <Select label="Instructor" value={current.id} onChange={(e) => setParams({ instructor: e.target.value })}>
           {list.data.instructors.map((i) => (

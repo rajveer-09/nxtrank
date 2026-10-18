@@ -7,40 +7,63 @@
 
 export class ApiError extends Error {
   constructor(
+    /** HTTP status; 0 when the request never reached the server */
     public status: number,
     message: string,
+    /** the server's stable error name ("not_found", "leetcode_blocked", "network", …) */
+    public code: string = "error",
+    /** quote this to find the server's log line for the request */
+    public requestId: string | null = null,
   ) {
     super(message);
   }
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
-    credentials: "same-origin",
-    ...init,
-    headers: { Accept: "application/json", ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers },
-  });
+  let res: Response;
+  try {
+    res = await fetch(path, {
+      credentials: "same-origin",
+      ...init,
+      headers: { Accept: "application/json", ...(init.body ? { "Content-Type": "application/json" } : {}), ...init.headers },
+    });
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    throw new ApiError(0, "Couldn't reach the server. Check your connection and try again.", "network");
+  }
   if (!res.ok) {
     let message = res.statusText;
+    let code = "error";
+    let requestId = res.headers.get("X-Request-ID");
     try {
       const body = await res.json();
       if (typeof body.detail === "string") message = body.detail;
       else if (Array.isArray(body.detail)) message = body.detail.map((d: { msg: string }) => d.msg).join("; ");
+      if (typeof body.code === "string") code = body.code;
+      if (typeof body.request_id === "string") requestId = body.request_id;
     } catch {
       /* not JSON */
     }
-    throw new ApiError(res.status, message);
+    throw new ApiError(res.status, message, code, requestId);
   }
   return res.json() as Promise<T>;
+}
+
+/** Starts waking the database (it sleeps when idle) without waiting for an answer. */
+export function warmDatabase() {
+  fetch("/api/warm", { credentials: "omit", cache: "no-store" }).catch(() => {
+    /* best effort: the real request will wait for it anyway */
+  });
 }
 
 const post = <T>(path: string, body: unknown) => request<T>(path, { method: "POST", body: JSON.stringify(body) });
 
 /** Which students a contest page shows: everyone, an instructor's own, or one college. */
-export type ContestScope = "all" | "mine" | `college:${string}`;
+export type ContestScope = "all" | "mine" | `college:${string}` | `instructor:${number}`;
 
 function scopeQuery(scope: ContestScope) {
   if (scope === "mine") return "?mine=true";
+  if (scope.startsWith("instructor:")) return `?instructor_id=${Number(scope.slice("instructor:".length))}`;
   if (scope.startsWith("college:")) return `?${new URLSearchParams({ college: scope.slice("college:".length) })}`;
   return "";
 }
@@ -53,6 +76,9 @@ export interface Me {
   role: Role;
   name: string | null;
   is_super: boolean; // the super admin: nobody can change this login from the dashboard
+  scans_enabled: boolean; // false on staging: its data is a copy of production's
+  /** set while an admin views the dashboard as this instructor */
+  viewing_as: { admin: string; admin_username: string; until: string } | null;
 }
 
 export type ResultStatus = "solved" | "zero" | "absent" | "invalid_handle" | "no_handle" | "duplicate_handle";
@@ -83,6 +109,7 @@ export interface Summary {
 export interface ContestStatus {
   state: ContestState;
   has_data: boolean;
+  in_review?: boolean; // a manual scan is waiting for an admin's review
   scanned_at?: string | null;
   ready_at?: string | null; // estimated time the results will be ready
   progress?: number; // 0..1 while scanning
@@ -144,6 +171,99 @@ export interface ContestQuery {
   per_page?: number;
 }
 
+// ---- topics -------------------------------------------------------------------------
+
+export type TagState = "official" | "provisional" | "insufficient" | "pending";
+export interface QuestionTopics {
+  state: TagState;
+  tags: { slug: string; name: string; source: "official" | "community" }[];
+  mentions: number | null; // community topic mentions (provisional)
+  fetched_at: string | null;
+}
+export interface TopicMetrics {
+  appeared: number;
+  solved: number;
+  solve_rate: number | null;
+  accuracy: number | null;
+  median_secs: number | null;
+}
+export interface TopicRow extends TopicMetrics {
+  slug: string;
+  name: string;
+  official: TopicMetrics; // the same, counting official tags only
+  provisional_appeared: number;
+  provisional_questions: number;
+}
+export interface TopicsData {
+  topics: TopicRow[];
+  weakest?: string[]; // groups: lowest solve rate among topics seen 10+ times
+  coverage: {
+    contests: number;
+    contests_provisional: number;
+    questions: number;
+    official: number;
+    provisional: number;
+    insufficient: number;
+    pending: number;
+    last_refresh: string | null;
+  };
+}
+export interface TagsStatus {
+  last_run: { at: string; line: string; checked: number; failed: number; changed: number } | null;
+  counts: Record<TagState, number>;
+  refresh_requested: boolean;
+  questions: { contest: string; contest_title: string; label: string; slug: string; title: string | null; state: TagState; tags: QuestionTopics["tags"]; mentions: number | null; fetched_at: string | null }[];
+}
+
+function topicParams(f: AnalyticsFilters) {
+  const p = new URLSearchParams();
+  if (f.last) p.set("last", String(f.last));
+  if (f.college) p.set("college", f.college);
+  return p;
+}
+
+export interface Rules {
+  analytics: {
+    trend_threshold: number;
+    trend_k: number;
+    absent_streak_alert: number;
+    top_n: number;
+    medals: number;
+    consistency_min_contests: number;
+    attendance_weight: number;
+    stability_weight: number;
+    std_cap: number;
+    consistency_labels: { from: number; label: string }[];
+    windows: number[];
+  };
+  schedule: {
+    timezone: string;
+    scan_delay_minutes: number;
+    provisional_retries_minutes: number[];
+    final_working_days: number | null;
+    final_time: string | null;
+    final_retries_hours: number[];
+    auto_lookback_days: number;
+    ratings_every_hours: number;
+    worker_awake_window: string;
+    worker_max_sleep_minutes: number;
+  };
+  tags: { min_mentions: number; top_share: number; max_tags: number; min_top: number; min_total: number; recent_days: number; nightly_time: string; monthly: string; weak_min_appeared: number; weakest_shown: number };
+  review: { enabled: boolean; draft_days: number; view_as_minutes: number };
+}
+
+export const topicsApi = {
+  cohort: (f: AnalyticsFilters) => request<TopicsData>(`/api/analytics/topics?${topicParams(f)}`),
+  instructor: (f: AnalyticsFilters, instructorId?: number) => {
+    const p = topicParams(f);
+    if (instructorId) p.set("instructor_id", String(instructorId));
+    return request<TopicsData>(`/api/instructor/analytics/topics?${p}`);
+  },
+  student: (id: number, last?: number) => request<TopicsData>(`/api/students/${id}/topics${last ? `?last=${last}` : ""}`),
+  status: () => request<TagsStatus>("/api/tags/status"),
+  refresh: () => post<{ requested: boolean }>("/api/admin/tags/refresh", {}),
+};
+
 export interface QuestionStat {
   label: string;
   question_id: number;
@@ -155,9 +275,49 @@ export interface QuestionStat {
   solve_rate: number | null;
   median_solve_secs: number | null;
   avg_wrong: number | null;
+  topics?: QuestionTopics; // contest page: the question's topic tags
 }
 
+/** A manual scan waiting for an admin: what adding it would change. */
+export interface DraftReview {
+  run_id: number;
+  contest_slug: string;
+  title: string | null;
+  kind: string;
+  finished_at: string | null;
+  expires_at: string | null;
+  outdated: boolean; // an automatic scan came after it: it can only be discarded
+  students: number;
+  solved_any: number;
+  participated: number;
+  participated_before: number | null; // null: the contest had no results yet
+  joined: number | null;
+  left: number | null;
+  changed: number | null;
+}
+
+export interface DraftRow {
+  student_id: number;
+  name: string;
+  roll_no: string | null;
+  college: string | null;
+  status: ResultStatus;
+  college_rank: number | null;
+  global_rank: number | null;
+  score: number | null;
+  solved: number | null;
+  before: { status: ResultStatus; college_rank: number | null; score: number | null } | null;
+}
+
+export const draftsApi = {
+  rows: (runId: number, offset = 0, limit = 50) =>
+    request<{ total: number; offset: number; rows: DraftRow[] }>(`/api/admin/scans/${runId}/draft/rows?offset=${offset}&limit=${limit}`),
+  publish: (runId: number) => post<{ published: number; contest_slug: string }>(`/api/admin/scans/${runId}/publish`, {}),
+  discard: (runId: number) => post<{ discarded: number }>(`/api/admin/scans/${runId}/discard`, {}),
+};
+
 export interface ContestDetail {
+  review?: DraftReview | null; // admins: a manual scan waiting for review
   slug: string;
   title: string;
   contest_type: string;
@@ -196,6 +356,9 @@ export interface ResultRow {
   score: number | null;
   solved: number | null;
   total_time_secs: number | null;
+  /** LeetCode removed this entry, zeroed it or moved it to the bottom after the contest;
+   *  what the earlier scan showed */
+  flagged?: { early_rank: number | null; early_score: number | null; early_solved: number | null } | null;
   problems: Record<string, ProblemResult>;
 }
 
@@ -277,7 +440,9 @@ export interface ScanRun {
   id: number;
   contest_slug: string;
   kind: string;
-  status: "running" | "complete" | "failed" | "cancelled";
+  status: "running" | "complete" | "failed" | "cancelled" | "review" | "discarded";
+  review_decision: string | null; // published | discarded | replaced | outdated | expired
+  reviewed_by: string | null;
   started_at: string | null;
   finished_at: string | null;
   participants: number | null;
@@ -302,6 +467,8 @@ export const api = {
   me: () => request<Me>("/api/auth/me"),
   login: (username: string, password: string) => post<Me>("/api/auth/login", { username, password }),
   logout: () => post<{ ok: boolean }>("/api/auth/logout", {}),
+  /** the numbers behind every rule, for the Guide */
+  rules: () => request<Rules>("/api/rules"),
 
   contests: (q: ContestQuery = {}) => {
     const p = new URLSearchParams();
@@ -609,6 +776,9 @@ export const instructorsApi = {
   update: (id: number, body: InstructorInput) =>
     request<Instructor>(`/api/admin/instructors/${id}`, { method: "PUT", body: JSON.stringify(body) }),
   remove: (id: number) => request<{ deleted: number }>(`/api/admin/instructors/${id}`, { method: "DELETE" }),
+  /** see the dashboard as this instructor (read-only, up to an hour) */
+  viewAs: (id: number) => post<Me>(`/api/admin/instructors/${id}/view-as`, {}),
+  returnToAdmin: () => post<Me>("/api/auth/return", {}),
 };
 
 // ---- student roster (admin) ---------------------------------------------------------

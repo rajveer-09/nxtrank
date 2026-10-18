@@ -71,7 +71,7 @@ export default function CollegesCard() {
         </div>
       ) : list.isError ? (
         <div className="p-5">
-          <ErrorBox error={list.error} />
+          <ErrorBox error={list.error} onRetry={() => list.refetch()} />
         </div>
       ) : list.data.colleges.length === 0 ? (
         <Empty>No colleges yet.</Empty>
@@ -92,7 +92,7 @@ export default function CollegesCard() {
                     <th className="px-3 py-2 text-right font-medium">Students</th>
                     <th className="px-3 py-2 text-right font-medium">Instructors</th>
                     <th className="px-3 py-2 font-medium">Last change</th>
-                    {canEdit && <th className="px-5 py-2" />}
+                    {canEdit && <th className="px-5 py-2"><span className="sr-only">Actions</span></th>}
                   </tr>
                 </thead>
                 <tbody>

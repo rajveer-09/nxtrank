@@ -5,9 +5,11 @@
  */
 import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 import { flexRender, getCoreRowModel, useReactTable, type ColumnDef, type SortingState } from "@tanstack/react-table";
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
+  topicsApi,
+  type TopicsData,
   analyticsApi,
   type AnalyticsFilters,
   type AnalyticsOverview,
@@ -19,12 +21,13 @@ import {
 } from "../api";
 import { ChartTable, LineChart, Meter, shortContest } from "../components/charts";
 import { ConsistencyBadge, Definitions, TrendBadge, downloadCsv, fmtTopPct } from "../components/metrics";
-import { Button, Card, CardHeader, Empty, ErrorBox, Input, Medal, Select, Stat, cx } from "../components/ui";
+import { Button, Card, CardHeader, Empty, ErrorBox, Input, Medal, Select, Stat, cx, scrollToTopOf } from "../components/ui";
 import { fmtDecimal, fmtDuration, fmtInt, fmtPct } from "../format";
 import { SETTLED } from "../queries";
 import { useDebounced } from "../useDebounced";
 import { AnalyticsSkeleton } from "../components/skeletons";
 import { Later } from "../components/Later";
+import { TopicsCard } from "../components/Topics";
 
 const WINDOWS = [
   { value: 5, label: "Last 5 contests" },
@@ -41,6 +44,7 @@ export default function Analytics() {
       queryKey={["analytics"]}
       fetch={analyticsApi.overview}
       fetchStudents={analyticsApi.students}
+      fetchTopics={topicsApi.cohort}
     />
   );
 }
@@ -52,6 +56,7 @@ export function AnalyticsView({
   queryKey,
   fetch,
   fetchStudents,
+  fetchTopics,
   actions,
 }: {
   title: ReactNode;
@@ -60,6 +65,8 @@ export function AnalyticsView({
   fetch: (f: AnalyticsFilters) => Promise<AnalyticsOverview>;
   /** The "All students" table, a page at a time. */
   fetchStudents: (f: AnalyticsFilters, page: StudentsPageQuery) => Promise<StudentsPage>;
+  /** Topic-wise stats for the same students (period and college filters apply). */
+  fetchTopics?: (f: AnalyticsFilters) => Promise<TopicsData>;
   actions?: ReactNode;
 }) {
   const [last, setLast] = useState(10);
@@ -124,14 +131,29 @@ export function AnalyticsView({
       {q.isPending ? (
         <AnalyticsSkeleton />
       ) : q.isError ? (
-        <ErrorBox error={q.error} />
+        <ErrorBox error={q.error} onRetry={() => q.refetch()} />
       ) : q.data.window.contests === 0 || q.data.summary.students === 0 ? (
         <Card>
           <Empty>{q.data.summary.students === 0 ? "No students here yet." : "No contests have been scanned yet."}</Empty>
         </Card>
       ) : (
         <div className={cx("flex flex-col gap-6 transition-opacity", q.isPlaceholderData && "opacity-60")}>
-          <Overview data={q.data} students={{ queryKey, filters, fetch: fetchStudents }} />
+          <Overview
+            data={q.data}
+            students={{ queryKey, filters, fetch: fetchStudents }}
+            topics={
+              fetchTopics && (
+                <Later order={5} minHeight={360} whenNear>
+                  <TopicsCard
+                    group
+                    queryKey={[...queryKey, filters.last ?? 0, filters.college ?? ""]}
+                    fetch={() => fetchTopics(filters)}
+                    subtitle="Each topic across these students' contests; weakest topics (lowest solve rate, seen 10+ times) first. Period and college filters apply."
+                  />
+                </Later>
+              )
+            }
+          />
         </div>
       )}
     </div>
@@ -144,7 +166,7 @@ interface StudentsSource {
   fetch: (f: AnalyticsFilters, page: StudentsPageQuery) => Promise<StudentsPage>;
 }
 
-function Overview({ data, students }: { data: AnalyticsOverview; students: StudentsSource }) {
+function Overview({ data, students, topics }: { data: AnalyticsOverview; students: StudentsSource; topics?: ReactNode }) {
   const s = data.summary;
   return (
     <>
@@ -173,6 +195,7 @@ function Overview({ data, students }: { data: AnalyticsOverview; students: Stude
       <Later order={5} minHeight={520}>
         <Leaders data={data} />
       </Later>
+      {topics /* topic-wise analytics, right above the student list */}
       <Later order={6} minHeight={900}>
         <StudentsTable data={data} source={students} />
       </Later>
@@ -571,7 +594,7 @@ function LeaderList({ title, subtitle, rows, render, empty }: { title: string; s
             <li key={r.id} className="flex items-center gap-3 px-5 py-2 text-[13px] transition-colors duration-150 hover:bg-fg/[0.025]">
               <span className={cx("tabular w-5 text-right text-xs", i < 3 ? "font-semibold text-accent-ink" : "text-ink-3")}>{i + 1}</span>
               <div className="min-w-0 flex-1">
-                <Link to={`/students/${r.id}`} className="font-medium hover:text-accent-ink hover:underline">
+                <Link to={`/students/${r.id}`} className="-my-1 inline-block py-1 font-medium hover:text-accent-ink hover:underline">
                   {r.name}
                 </Link>
                 <div className="truncate text-xs text-ink-3">{[r.roll_no, r.college].filter(Boolean).join(" · ")}</div>
@@ -646,7 +669,11 @@ function StudentsTable({ data, source }: { data: AnalyticsOverview; source: Stud
   const resetKey = JSON.stringify([search, sort, source.filters]);
   const [page, setPage] = useState({ key: resetKey, index: 0 });
   const pageIndex = page.key === resetKey ? page.index : 0;
-  const goTo = (index: number) => setPage({ key: resetKey, index });
+  const card = useRef<HTMLDivElement>(null);
+  const goTo = (index: number) => {
+    setPage({ key: resetKey, index });
+    scrollToTopOf(card.current); // the new page starts at its first row
+  };
 
   const pageQuery = (index: number): StudentsPageQuery => ({
     q: search, sort: sort.id, desc: sort.desc, offset: index * PAGE_SIZE, limit: PAGE_SIZE,
@@ -676,7 +703,7 @@ function StudentsTable({ data, source }: { data: AnalyticsOverview; source: Stud
         accessorFn: (r) => r.name.toLowerCase(),
         cell: ({ row: { original: r } }) => (
           <div className="min-w-44 max-w-64">
-            <Link to={`/students/${r.id}`} className="font-medium hover:text-accent-ink hover:underline">
+            <Link to={`/students/${r.id}`} className="-my-1 inline-block py-1 font-medium hover:text-accent-ink hover:underline">
               {r.name}
             </Link>
             <div className="truncate text-xs text-ink-3">{[r.roll_no, r.college].filter(Boolean).join(" · ")}</div>
@@ -852,6 +879,7 @@ function StudentsTable({ data, source }: { data: AnalyticsOverview; source: Stud
   }
 
   return (
+    <div ref={card}>
     <Card>
       <CardHeader
         title="All students"
@@ -891,7 +919,7 @@ function StudentsTable({ data, source }: { data: AnalyticsOverview; source: Stud
             {q.isError && (
               <tr>
                 <td colSpan={columns.length} className="px-5 py-4">
-                  <ErrorBox error={q.error} />
+                  <ErrorBox error={q.error} onRetry={() => q.refetch()} />
                 </td>
               </tr>
             )}
@@ -930,5 +958,6 @@ function StudentsTable({ data, source }: { data: AnalyticsOverview; source: Stud
         </div>
       </div>
     </Card>
+    </div>
   );
 }

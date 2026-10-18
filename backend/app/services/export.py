@@ -42,6 +42,9 @@ def table(slug: str, results: list[StudentResult], labels: list[str]) -> tuple[l
     ]
     for label in labels:
         header += [f"{label}_time", f"{label}_wrong"]
+    with_flags = any(r.flag for r in results)  # only contests where LeetCode penalised someone
+    if with_flags:
+        header.append("flagged_by_leetcode")
     header.append("ranking_url")
 
     rows = []
@@ -63,6 +66,8 @@ def table(slug: str, results: list[StudentResult], labels: list[str]) -> tuple[l
         for label in labels:
             prob = p.problems.get(label) if p else None
             row += [fmt_secs(prob.solve_secs), prob.fail_count] if prob else ["", ""]
+        if with_flags:
+            row.append(f"early rank {r.flag['early_rank']}, {r.flag['early_score']} pts" if r.flag else "")
         row.append(contest_ranking_url(slug, p.position) if p else "")
         rows.append([_safe(v) for v in row])
     return header, rows
@@ -131,6 +136,8 @@ def result_dict(slug: str, r: StudentResult) -> dict:
         "score": p.score if p else None,
         "solved": p.solved_count if p else None,
         "total_time_secs": p.total_time_secs if p else None,
+        # LeetCode removed this entry, zeroed it or moved it to the bottom after the contest
+        "flagged": r.flag,
         "problems": {
             label: {"solve_secs": prob.solve_secs, "fail_count": prob.fail_count, "lang": prob.lang}
             for label, prob in (p.problems.items() if p else ())

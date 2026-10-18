@@ -224,6 +224,29 @@ class LeetCodeClient:
         return d.get("userContestRanking"), history
 
 
+    async def question_tags(self, title_slug: str) -> list[tuple[str, str]]:
+        """LeetCode's official topic tags for a question, as (slug, name). Empty while
+        LeetCode hasn't tagged it yet (usually 1-4 weeks after a contest)."""
+        data = await self.post_json("/graphql/", {"query": _QUESTION_TAGS, "variables": {"s": title_slug}})
+        if "data" not in data or data.get("errors"):
+            raise LeetCodeError(f"question tags for {title_slug!r}: {str(data)[:300]}")
+        question = (data["data"] or {}).get("question") or {}
+        return [(t["slug"], t["name"]) for t in question.get("topicTags") or [] if t.get("slug")]
+
+    async def community_topics(self, title_slug: str) -> list[tuple[str, str, int]]:
+        """Topics that community solutions of a question use, as (slug, name, how many
+        solutions). Available within hours of a contest, unlike the official tags."""
+        data = await self.post_json("/graphql/", {"query": _COMMUNITY_TOPICS, "variables": {"s": title_slug}})
+        if "data" not in data or data.get("errors"):
+            raise LeetCodeError(f"community topics for {title_slug!r}: {str(data)[:300]}")
+        tags = ((data["data"] or {}).get("ugcArticleSolutionTags") or {}).get("knowledgeTags") or []
+        return [(t["slug"], t["name"], int(t.get("count") or 0)) for t in tags if t.get("slug")]
+
+
+_QUESTION_TAGS = "query q($s: String!) { question(titleSlug: $s) { topicTags { name slug } } }"
+_COMMUNITY_TOPICS = """query q($s: String!) {
+  ugcArticleSolutionTags(questionSlug: $s) { knowledgeTags { name slug count } }
+}"""
 _MATCHED_USER = "query q($u: String!) { matchedUser(username: $u) { username } }"
 _CONTEST_RANKING = """query q($u: String!) {
   userContestRanking(username: $u) { attendedContestsCount rating globalRanking topPercentage }

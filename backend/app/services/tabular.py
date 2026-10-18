@@ -43,13 +43,13 @@ def read_table(data: bytes, filename: str) -> list[list[str]]:
         try:
             text = data.decode("utf-8-sig")
         except UnicodeDecodeError:
-            raise TableError("the CSV isn't UTF-8 text; save it from Excel as .xlsx instead")
+            raise TableError("the CSV isn't UTF-8 text; save it from Excel as .xlsx instead") from None
         rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text))]
     elif name.endswith((".xlsx", ".xlsm")):
         try:
             wb = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         except Exception:
-            raise TableError("couldn't read the file as an Excel workbook (.xlsx)")
+            raise TableError("couldn't read the file as an Excel workbook (.xlsx)") from None
         ws = wb.worksheets[0]
         rows = [[_text(v) for v in r] for r in ws.iter_rows(values_only=True)]
         wb.close()

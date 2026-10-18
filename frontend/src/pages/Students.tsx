@@ -33,7 +33,7 @@ export default function Students() {
   const toggleSort = (key: "rating" | "attended") => setSort((s) => (s === `${key}_desc` ? `${key}_asc` : `${key}_desc`));
 
   if (students.isPending) return <StudentsSkeleton />;
-  if (students.isError) return <ErrorBox error={students.error} />;
+  if (students.isError) return <ErrorBox error={students.error} onRetry={() => students.refetch()} />;
 
   const { rows, total, colleges, active: activeCount, handle_problems: handleProblems } = students.data;
 
@@ -85,7 +85,7 @@ export default function Students() {
           <Empty>No students match these filters.</Empty>
         ) : (
           <div className={cx("overflow-x-auto transition-opacity", students.isPlaceholderData && "opacity-60")}>
-            <table className="w-full text-sm">
+            <table className="stack-table w-full text-sm">
               <thead className="text-left text-xs text-ink-2">
                 <tr className="border-b border-fg/5">
                   <th className="px-5 py-2 font-medium">Student</th>
@@ -123,25 +123,25 @@ export default function Students() {
               <tbody>
                 {rows.map((s) => (
                   <tr key={s.id} className="border-b border-fg/5 last:border-0 hover:bg-surface-2/60">
-                    <td className="px-5 py-2.5">
+                    <td className="stack-full px-5 py-2.5">
                       <Link to={`/students/${s.id}`} className="font-medium hover:text-accent-ink hover:underline">
                         {s.name}
                       </Link>
                       {!s.active && <span className="ml-2 text-xs text-ink-3">(removed)</span>}
                     </td>
-                    <td className="tabular px-3 py-2.5 text-ink-2">{s.roll_no}</td>
-                    <td className="px-3 py-2.5 text-ink-2">{s.college}</td>
-                    <td className="px-3 py-2.5">
+                    <td data-label="Roll no" className="tabular px-3 py-2.5 text-ink-2">{s.roll_no}</td>
+                    <td data-label="College" className="px-3 py-2.5 text-ink-2">{s.college}</td>
+                    <td data-label="LeetCode" className="px-3 py-2.5">
                       {s.leetcode_handle && s.handle_status !== "missing" ? (
                         <ExternalLink href={`https://leetcode.com/u/${encodeURIComponent(s.leetcode_handle)}/`}>{s.leetcode_handle}</ExternalLink>
                       ) : (
                         <span className="text-ink-3">{s.leetcode_handle || "—"}</span>
                       )}
                     </td>
-                    <td className="px-3 py-2.5">
+                    <td data-label="Handle" className="px-3 py-2.5">
                       <HandleStatusBadge status={s.handle_status} />
                     </td>
-                    <td className="px-3 py-2.5 text-right" title={s.rating_synced_at ? `From LeetCode, ${fmtIso(s.rating_synced_at)}` : "Not fetched yet"}>
+                    <td data-label="Rating" className="px-3 py-2.5 text-right" title={s.rating_synced_at ? `From LeetCode, ${fmtIso(s.rating_synced_at)}` : "Not fetched yet"}>
                       {s.rating != null ? (
                         <>
                           <div className="tabular font-semibold text-ink">{s.rating.toLocaleString()}</div>
@@ -154,7 +154,7 @@ export default function Students() {
                         <span className="text-xs text-ink-3">{s.rating_synced_at ? "unrated" : "—"}</span>
                       )}
                     </td>
-                    <td className="tabular px-5 py-2.5 text-right">
+                    <td data-label="Attended" className="tabular px-5 py-2.5 text-right">
                       {s.contests_attended} <span className="text-ink-3">/ {s.contests_scanned}</span>
                     </td>
                   </tr>

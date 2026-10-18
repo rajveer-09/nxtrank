@@ -8,6 +8,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { ApiError } from "./api";
+import { setBusyCheck } from "./idle";
 import { markSessionExpired } from "./auth";
 import "@fontsource-variable/inter"; // self-hosted, cached forever; only the Latin subset is downloaded
 import App from "./App";
@@ -27,11 +28,14 @@ const queryClient: QueryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60_000,
-      retry: (count, error) => !(error instanceof ApiError && error.status < 500) && count < 2,
+      // retry server trouble and dropped connections (status 0), not a 4xx: asking again won't change it
+      retry: (count, error) => !(error instanceof ApiError && error.status > 0 && error.status < 500) && count < 2,
       refetchOnWindowFocus: false,
     },
   },
 });
+// background prefetching waits while the page is loading its own data (idle.ts)
+setBusyCheck(() => queryClient.isFetching() > 0);
 
 // Premium click feedback: a soft wave spreads from the pointer on elements with .ripple.
 document.addEventListener(

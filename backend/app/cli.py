@@ -25,14 +25,18 @@ import re
 import sys
 from pathlib import Path
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.engine import make_url
 
 from app.config import get_settings
 from app.db.migrate import upgrade
-from app.db.models import Contest, ScanRun, Student
+from app.db.models import (
+    CohortStats, Contest, InstructorStudent, ProblemResult, RatingHistory, Result, ScanRequest,
+    ScanRun, Student, StudentStats,
+)
 from app.db.session import make_engine, make_session_factory
 from app.leetcode.client import LeetCodeClient, LeetCodeError
+from app.request_context import configure_logging
 from app.scan.matcher import match_students
 from app.scan.parser import parse_rows, question_labels
 from app.scan.scanner import ContestNotFinishedError, ScanIncompleteError, scan_contest
@@ -54,6 +58,7 @@ log = logging.getLogger("app.cli")
 _SLUG = re.compile(r"(weekly|biweekly)-contest-\d+")
 
 EXIT_OK, EXIT_ERROR, EXIT_INCOMPLETE = 0, 1, 2
+CLEAR_DATA_CONFIRMATION = "DELETE STUDENT AND CONTEST DATA"
 
 
 def _safe_url(database_url: str) -> str:
@@ -246,7 +251,13 @@ async def cmd_worker(args) -> int:
     worker = Worker(session_factory, lambda: _client(args), settings=args.settings,
                     notifier=notifier)
     if args.once:
-        await worker.tick()
+        if not worker.claim_lock():
+            log.error("another worker (%s) is running against this database", worker.lock_holder)
+            return EXIT_ERROR
+        try:
+            await worker.tick()
+        finally:
+            worker.release_lock()
         return EXIT_OK
     await worker.run_forever(args.interval)
     return EXIT_OK
@@ -339,6 +350,50 @@ def cmd_status(args) -> int:
     return _print_schedule(args)
 
 
+def cmd_clear_data(args) -> int:
+    """Preview or clear student and scan data while keeping contest definitions."""
+    if args.execute and args.confirm != CLEAR_DATA_CONFIRMATION:
+        log.error("execution requires --confirm %r", CLEAR_DATA_CONFIRMATION)
+        return EXIT_ERROR
+    if not args.execute and args.confirm:
+        log.error("--confirm is only valid together with --execute")
+        return EXIT_ERROR
+
+    tables = [
+        ("scan requests", ScanRequest),
+        ("problem results", ProblemResult),
+        ("contest results", Result),
+        ("rating history", RatingHistory),
+        ("student analytics summaries", StudentStats),
+        ("cohort analytics summaries", CohortStats),
+        ("instructor-student assignments", InstructorStudent),
+        ("scan runs", ScanRun),
+        ("students", Student),
+    ]
+    with _session(args) as session:
+        with session.begin():
+            preserved_contests = session.scalar(select(func.count()).select_from(Contest)) or 0
+            counts = {
+                label: session.scalar(select(func.count()).select_from(model)) or 0
+                for label, model in tables
+            }
+            print(f"database: {_safe_url(args.database_url)}")
+            print("mode: EXECUTE" if args.execute else "mode: PREVIEW (no rows deleted)")
+            print(f"contest definitions preserved (will show as not scanned): {preserved_contests}")
+            for label, count in counts.items():
+                print(f"{label}: {count}")
+
+            if args.execute:
+                for _, model in tables:
+                    session.execute(delete(model))
+
+    if args.execute:
+        print("student and scan data cleared; contest definitions preserved")
+    else:
+        print(f"To delete these rows, rerun with --execute --confirm \"{CLEAR_DATA_CONFIRMATION}\"")
+    return EXIT_OK
+
+
 # ---- argument parsing ---------------------------------------------------------
 
 
@@ -391,6 +446,12 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("status", parents=[common], help="show roster, scans and upcoming contests")
 
+    p = sub.add_parser("clear-data", help="preview or remove all student and contest data")
+    p.add_argument("--database-url", required=True, help="explicit database URL to preview or clear")
+    p.add_argument("-v", "--verbose", action="store_true")
+    p.add_argument("--execute", action="store_true", help="perform the deletion (preview is the default)")
+    p.add_argument("--confirm", help=f"required with --execute: {CLEAR_DATA_CONFIRMATION}")
+
     p = sub.add_parser("discover", parents=[common, net],
                        help="find upcoming contests and update the list of past contests")
     p.add_argument("--full", action="store_true", help="re-read the whole past-contest list")
@@ -419,10 +480,7 @@ def main(argv: list[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     args.settings = settings
-    logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    configure_logging(logging.DEBUG if args.verbose else logging.INFO)
 
     for slug in getattr(args, "slugs", None) or [getattr(args, "slug", None)]:
         if slug is not None and not _SLUG.fullmatch(slug):
@@ -435,6 +493,7 @@ def main(argv: list[str] | None = None) -> int:
         "scan": cmd_scan,
         "export": cmd_export,
         "status": cmd_status,
+        "clear-data": cmd_clear_data,
         "discover": cmd_discover,
         "sync-ratings": cmd_sync_ratings,
         "test-alert": cmd_test_alert,

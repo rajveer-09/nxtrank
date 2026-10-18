@@ -4,6 +4,7 @@
  * Date: 14 October 2026
  */
 import { useSyncExternalStore } from "react";
+import { flushSync } from "react-dom";
 
 export type Theme = "dark" | "light";
 
@@ -14,19 +15,30 @@ export function currentTheme(): Theme {
   return document.documentElement.dataset.theme === "light" ? "light" : "dark";
 }
 
-export function setTheme(next: Theme) {
-  if (next === currentTheme()) return;
-  const root = document.documentElement;
-  root.classList.add("theme-transition"); // cross-fade colours, then remove
-  root.dataset.theme = next;
+function apply(next: Theme) {
+  document.documentElement.dataset.theme = next;
   document.querySelector('meta[name="theme-color"]')?.setAttribute("content", next === "light" ? "#ffffff" : "#17191c");
   try {
     localStorage.setItem(KEY, next);
   } catch {
     /* private mode: theme just won't persist */
   }
-  window.setTimeout(() => root.classList.remove("theme-transition"), 320);
   listeners.forEach((l) => l());
+}
+
+type ViewTransitionDoc = Document & { startViewTransition?: (update: () => void) => unknown };
+
+/** Switch theme: the whole page cross-fades at once, quickly (View Transitions), so
+ *  gradients, shadows and charts change together. Without View Transitions (or with
+ *  reduced motion) it switches at once. */
+export function setTheme(next: Theme) {
+  if (next === currentTheme()) return;
+  const doc = document as ViewTransitionDoc;
+  if (!doc.startViewTransition || window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    apply(next);
+    return;
+  }
+  doc.startViewTransition(() => flushSync(() => apply(next)));
 }
 
 const subscribe = (l: () => void) => {

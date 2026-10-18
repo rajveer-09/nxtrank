@@ -1,0 +1,118 @@
+# Author: Rajveer Sharma
+# © NxtWave
+# Date: 16 October 2026
+# Nightly backup of the production database: a pg_dump, encrypted with a passphrase,
+# kept 7 days as a private artifact of this run. On the 1st of each month (or when run by
+# hand with "restore check" ticked) the dump is also restored into a throwaway Postgres
+# and its row counts compared with production's. Restore steps: deploy/README.md.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions):
+#   BACKUP_DATABASE_URL  production connection string (the pooled one works too: the
+#                        "-pooler" part is removed, since pg_dump needs a direct session)
+#   BACKUP_PASSPHRASE    long random passphrase; without it a backup can't be opened
+name: Backup
+
+on:
+  schedule:
+    - cron: "30 20 * * *"   # 02:00 IST every night
+    - cron: "0 21 1 * *"    # 02:30 IST on the 1st: backup + restore check
+  workflow_dispatch:
+    inputs:
+      restore_check:
+        description: "Also restore the dump into a scratch database and compare row counts"
+        type: boolean
+        default: false
+
+concurrency:
+  group: backup
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    services:
+      scratch:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: scratch
+          POSTGRES_DB: restore_check
+        ports: ["5432:5432"]
+        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      RESTORE_CHECK: ${{ github.event.schedule == '0 21 1 * *' || inputs.restore_check == true }}
+    steps:
+      - name: Check the secrets are set
+        env:
+          URL: ${{ secrets.BACKUP_DATABASE_URL }}
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          [ -n "$URL" ] || { echo "::error::secret BACKUP_DATABASE_URL is not set"; exit 1; }
+          [ ${#PASS} -ge 20 ] || { echo "::error::secret BACKUP_PASSPHRASE is missing or shorter than 20 characters"; exit 1; }
+
+      - name: Dump production
+        env:
+          URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          # the app's URL says "postgresql+psycopg://"; pg_dump wants "postgresql://", and a direct host
+          export PGURL="$(printf '%s' "$URL" | sed -e 's#^postgresql+psycopg://#postgresql://#' -e 's#-pooler\.#.#')"
+          echo "::add-mask::$PGURL"
+          stamp="$(date -u +%Y%m%dT%H%MZ)"
+          echo "STAMP=$stamp" >> "$GITHUB_ENV"
+          # Postgres 17 tools in Docker: newer than the runner's, and able to dump any older server
+          docker run --rm --network host -e PGURL -v "$PWD:/work" -w /work postgres:17 \
+            sh -c 'pg_dump --format=custom --compress=9 --no-owner --no-privileges --dbname="$PGURL" --file=nxtrank.dump \
+                   && pg_restore --list nxtrank.dump > /dev/null'
+          ls -lh nxtrank.dump
+
+      - name: Count production rows
+        if: env.RESTORE_CHECK == 'true'
+        env:
+          URL: ${{ secrets.BACKUP_DATABASE_URL }}
+        run: |
+          export PGURL="$(printf '%s' "$URL" | sed -e 's#^postgresql+psycopg://#postgresql://#' -e 's#-pooler\.#.#')"
+          echo "::add-mask::$PGURL"
+          cat > count.sh <<'SH'
+          tables=$(psql "$1" -At -c "select tablename from pg_tables where schemaname = 'public' order by 1")
+          for t in $tables; do echo "$t $(psql "$1" -At -c "select count(*) from \"$t\"")"; done
+          SH
+          docker run --rm --network host -e PGURL -v "$PWD:/work" -w /work postgres:17 sh count.sh "$PGURL" > counts-production.txt
+          cat counts-production.txt
+
+      - name: Restore into a scratch database and compare
+        if: env.RESTORE_CHECK == 'true'
+        run: |
+          scratch="postgresql://postgres:scratch@localhost:5432/restore_check"
+          docker run --rm --network host -v "$PWD:/work" -w /work postgres:17 \
+            pg_restore --no-owner --no-privileges --exit-on-error --dbname="$scratch" nxtrank.dump
+          docker run --rm --network host -v "$PWD:/work" -w /work postgres:17 sh count.sh "$scratch" > counts-restored.txt
+          if diff -u counts-production.txt counts-restored.txt; then
+            echo "restore check ok: $(wc -l < counts-restored.txt) tables, row counts match"
+          else
+            # app_state and login_failures can change between the dump and the count
+            changed=$(diff counts-production.txt counts-restored.txt | grep '^[<>]' | awk '{print $2}' | sort -u | grep -v -E '^(app_state|login_failures)$' || true)
+            if [ -n "$changed" ]; then echo "::error::restore check failed for: $changed"; exit 1; fi
+            echo "restore check ok (only app_state / login_failures moved while it ran)"
+          fi
+
+      - name: Encrypt
+        env:
+          PASS: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          printf '%s' "$PASS" | gpg --batch --yes --pinentry-mode loopback --passphrase-fd 0 \
+            --symmetric --cipher-algo AES256 --output "nxtrank-$STAMP.dump.gpg" nxtrank.dump
+          rm nxtrank.dump
+          sha256sum "nxtrank-$STAMP.dump.gpg" | tee "nxtrank-$STAMP.sha256"
+
+      - name: Keep for 7 days
+        uses: actions/upload-artifact@v5
+        with:
+          name: nxtrank-backup-${{ env.STAMP }}
+          path: |
+            nxtrank-${{ env.STAMP }}.dump.gpg
+            nxtrank-${{ env.STAMP }}.sha256
+          retention-days: 7
+          if-no-files-found: error

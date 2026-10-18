@@ -14,8 +14,13 @@ from sqlalchemy.orm import Session
 
 from app.api.etag import conditional
 from app.api.fastjson import FastJSONRoute
-from app.api.deps import current_user, get_db, require_admin, require_super
-from app.db.models import College, ScanRequest, ScanRun, Student, Upload, User
+from app.api.deps import current_user, get_db, get_settings, require_admin, require_super, session_fingerprint
+from app.api.errors import ApiError
+from app.api.routes_data import scans_allowed
+from app.config import Settings
+from app.db.models import College, ScanRequest, ScanRun, Student, Upload, User, utcnow
+from app.services import drafts, tags, view_as, wake
+from app.services.scan_status import set_state
 from app.services.dashboard import iso
 from app.services.instructors import (
     MAX_INSTRUCTOR_ROWS, InstructorError, delete_instructor, get_instructor, import_instructors, instructor_json, instructors_template,
@@ -45,7 +50,7 @@ async def _upload(request: Request, filename: str) -> list[list[str]]:
     try:
         return read_table(await request.body(), filename)
     except TableError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
 
 
 def _xlsx(data: bytes, name: str) -> Response:
@@ -86,7 +91,7 @@ def _save_student(db: Session, body: StudentBody, user: User, student: Student |
                              actor=user.username, via=VIA_UI, student=student, can_add_colleges=user.is_super)
     except RosterEditError as e:
         db.rollback()
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     db.commit()
     log.info("student %s %s by %s", st.roll_no, outcome, user.username)
     return student_json(st)
@@ -115,7 +120,7 @@ def student_active(student_id: int, body: ActiveBody, db: Session = Depends(get_
     try:
         set_active(db, st, body.active, actor=user.username)
     except RosterEditError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     return student_json(st)
 
 
@@ -128,7 +133,7 @@ async def upload_students(request: Request, filename: str, preview: bool = False
         return import_students(db, rows, actor=user.username, source=filename, can_add_colleges=user.is_super,
                                preview=preview)
     except RosterEditError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
 
 
 @router.get("/students/template.xlsx")
@@ -142,9 +147,53 @@ def scan_runs(limit: int = 30, db: Session = Depends(get_db)) -> list[dict]:
     return [
         {"id": r.id, "contest_slug": r.contest_slug, "kind": r.kind, "status": r.status,
          "started_at": iso(r.started_at), "finished_at": iso(r.finished_at),
-         "participants": r.user_num, "students": r.students, "error": r.error}
+         "participants": r.user_num, "students": r.students, "error": r.error,
+         "review_decision": r.review_decision, "reviewed_by": r.reviewed_by}
         for r in rows
     ]
+
+
+@router.post("/tags/refresh", status_code=status.HTTP_202_ACCEPTED)
+def refresh_tags(db: Session = Depends(get_db), user: User = Depends(require_admin),
+                 settings: Settings = Depends(get_settings)) -> dict:
+    """Ask the worker to refresh the last 45 days' topic tags now (it talks to LeetCode)."""
+    scans_allowed(settings)
+    set_state(db, tags.REQUEST_KEY, user.username, utcnow())
+    wake.signal()
+    return {"requested": True}
+
+
+# ---- drafts: manual scans waiting for review (services/drafts.py) -----------------------
+
+def _draft_call(fn, *args, **kw):
+    try:
+        return fn(*args, **kw)
+    except drafts.DraftError as e:
+        raise ApiError(409, str(e), "draft_gone") from None
+
+
+@router.get("/scans/{run_id}/draft")
+def draft_summary(run_id: int, db: Session = Depends(get_db)) -> dict:
+    """What adding this draft would change on the dashboard."""
+    return _draft_call(drafts.summary, db, run_id)
+
+
+@router.get("/scans/{run_id}/draft/rows")
+def draft_rows(run_id: int, offset: int = Query(0, ge=0), limit: int = Query(50, ge=1, le=500),
+               db: Session = Depends(get_db)) -> dict:
+    return _draft_call(drafts.rows_page, db, run_id, offset=offset, limit=limit)
+
+
+@router.post("/scans/{run_id}/publish")
+def publish_draft(run_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    run = _draft_call(drafts.publish, db, run_id, user.username)
+    return {"published": run.id, "contest_slug": run.contest_slug}
+
+
+@router.post("/scans/{run_id}/discard")
+def discard_draft(run_id: int, db: Session = Depends(get_db), user: User = Depends(require_admin)) -> dict:
+    _draft_call(drafts.discard, db, run_id, user.username)
+    return {"discarded": run_id}
 
 
 class ScanBody(BaseModel):
@@ -169,7 +218,8 @@ def _request_json(r: ScanRequest) -> dict:
 
 @router.post("/scans", status_code=status.HTTP_202_ACCEPTED)
 def request_scan(body: ScanBody, db: Session = Depends(get_db),
-                 user: User = Depends(require_admin)) -> dict:
+                 user: User = Depends(require_admin), settings: Settings = Depends(get_settings)) -> dict:
+    scans_allowed(settings)
     existing = db.scalar(select(ScanRequest).where(
         ScanRequest.contest_slug == body.slug, ScanRequest.handled_at.is_(None)))
     if existing:
@@ -177,6 +227,7 @@ def request_scan(body: ScanBody, db: Session = Depends(get_db),
     req = ScanRequest(contest_slug=body.slug, kind=body.kind, requested_by=user.username)
     db.add(req)
     db.commit()
+    wake.signal()
     return _request_json(req)
 
 
@@ -212,7 +263,7 @@ def _save(db: Session, body: InstructorBody, user: User | None, actor: User) -> 
                                actor=actor.username, via=VIA_UI)
     except InstructorError as e:
         db.rollback()
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     return instructor_json(db, user)
 
 
@@ -241,6 +292,26 @@ def remove_instructor(user_id: int, db: Session = Depends(get_db)) -> dict:
     return {"deleted": user_id}
 
 
+@router.post("/instructors/{user_id}/view-as")
+def start_view_as(user_id: int, request: Request, db: Session = Depends(get_db),
+                  admin: User = Depends(require_admin), settings: Settings = Depends(get_settings)) -> dict:
+    """See the dashboard as this instructor does (read-only, for up to an hour)."""
+    target = get_instructor(db, user_id)
+    if target is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "no such instructor")
+    if not target.active:
+        raise HTTPException(status.HTTP_409_CONFLICT, "this instructor's login is switched off")
+    view_as.start(request.session, db, admin, target, session_fingerprint)
+    return {"username": target.username, "role": target.role, "name": target.display_name,
+            "is_super": False, "scans_enabled": settings.scans_enabled,
+            "viewing_as": view_as.summary(request.session, db)}
+
+
+@router.get("/audit-events")
+def audit_events(limit: int = Query(50, ge=1, le=200), db: Session = Depends(get_db)) -> list[dict]:
+    return view_as.recent_events(db, limit)
+
+
 @router.post("/instructors/import")
 async def upload_instructors(request: Request, filename: str, preview: bool = False, db: Session = Depends(get_db),
                              user: User = Depends(require_admin)) -> dict:
@@ -249,7 +320,7 @@ async def upload_instructors(request: Request, filename: str, preview: bool = Fa
     try:
         return import_instructors(db, rows, actor=user.username, source=filename, preview=preview)
     except InstructorError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
 
 
 @router.get("/instructors/template.xlsx")
@@ -277,10 +348,10 @@ def _save_admin(db: Session, body: AdminBody, target: User | None, user: User) -
         saved = save_admin(db, user=target, email=body.email, name=body.name, password=body.password,
                            active=body.active, actor=user, via=VIA_UI)
     except ProtectedError as e:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
     except AdminError as e:
         db.rollback()
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     return admin_json(saved, user)
 
 
@@ -307,9 +378,9 @@ def remove_admin(user_id: int, db: Session = Depends(get_db), user: User = Depen
     try:
         delete_admin(db, _admin(db, user_id), actor=user)
     except ProtectedError as e:
-        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e))
+        raise HTTPException(status.HTTP_403_FORBIDDEN, str(e)) from e
     except AdminError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     return {"deleted": user_id}
 
 
@@ -337,7 +408,7 @@ def create_colleges(body: CollegesBody, preview: bool = False, db: Session = Dep
         return add_colleges(db, body.names, actor=user.username, via=VIA_UI, preview=preview)
     except CollegeError as e:
         db.rollback()
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
 
 
 def _college(db: Session, college_id: int) -> College:
@@ -354,7 +425,7 @@ def update_college(college_id: int, body: CollegeBody, db: Session = Depends(get
         c = rename_college(db, _college(db, college_id), body.name, actor=user.username, via=VIA_UI)
     except CollegeError as e:
         db.rollback()
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     return next(x for x in list_colleges(db) if x["id"] == c.id)
 
 
@@ -363,7 +434,7 @@ def remove_college(college_id: int, db: Session = Depends(get_db), user: User = 
     try:
         delete_college(db, _college(db, college_id))
     except CollegeError as e:
-        raise HTTPException(422, str(e))
+        raise HTTPException(422, str(e)) from e
     return {"deleted": college_id}
 
 
@@ -393,5 +464,5 @@ def undo(upload_id: int, db: Session = Depends(get_db), user: User = Depends(req
     try:
         result = undo_upload(db, u, actor=user.username)
     except UploadError as e:
-        raise HTTPException(status.HTTP_409_CONFLICT, str(e))
+        raise HTTPException(status.HTTP_409_CONFLICT, str(e)) from e
     return {**result, "upload": upload_detail(db, u)}

@@ -22,7 +22,7 @@ BUDGET = {
     "/api/auth/me": 1,
     "/api/contests": 7,
     "/api/scan-status": 4,
-    f"/api/contests/{SLUG}": 7,
+    f"/api/contests/{SLUG}": 8,  # + the questions' topic tags
     f"/api/contests/{SLUG}/results": 5,
     "/api/analytics": 6,  # 5 on PostgreSQL (summary tables); SQLite computes from the rows
     "/api/analytics/students": 6,

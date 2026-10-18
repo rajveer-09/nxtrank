@@ -128,7 +128,7 @@ async def scan_contest(
     rows: list[tuple[RankRow, dict[str, Submission]]] = []
     seen: set[str] = set()
     for page in range(1, total_pages + 1):
-        for row, subs in zip(pages[page].total_rank, pages[page].submissions):
+        for row, subs in zip(pages[page].total_rank, pages[page].submissions, strict=False):  # an odd page mustn't abort a scan
             key = f"{row.data_region}:{row.user_slug.lower()}"  # a .cn user may share a .com handle
             if key in seen:  # leaderboard shifted between page fetches
                 continue

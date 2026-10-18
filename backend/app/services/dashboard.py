@@ -246,9 +246,15 @@ def contest_page(session: Session, slug: str, *, now: datetime, scan_delay: time
     # commits its results and its run together), so they're built once per data
     # version; the status above depends on the clock and is worked out every time.
     def body() -> dict:
+        from app.services.topics import contest_tags  # topics imports analytics, which imports this module
+
         rows, problems = _load_contest_rows(session, slug)
+        detail = _detail(c, rows, problems, student_ids, snap)
+        chips = contest_tags(session, c)  # topic tags per question (official / provisional)
+        for q in detail["questions"]:
+            q["topics"] = chips.get(q["label"], {"state": "pending", "tags": [], "mentions": None, "fetched_at": None})
         return {
-            **_detail(c, rows, problems, student_ids, snap),
+            **detail,
             "distributions": distributions(c, _scoped(rows, student_ids), problems, student_ids),
         }
     scope = frozenset(student_ids) if student_ids is not None else None

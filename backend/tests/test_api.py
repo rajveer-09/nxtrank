@@ -46,7 +46,6 @@ def env(tmp_path):
         set_user(s, "viewer", "viewer-password-1", "viewer")
     settings = replace(make_settings(), database_url=url,
                        frontend_dist=tmp_path / "dist")
-    routes_auth._failures.clear()
     return settings, factory
 
 
@@ -72,7 +71,7 @@ def test_login_logout_and_throttle(env):
     assert c.post("/api/auth/login", json={"username": "viewer", "password": "nope"}).status_code == 401
     assert c.post("/api/auth/login", json={"username": "nobody", "password": "nope"}).status_code == 401
     r = c.post("/api/auth/login", json={"username": " Viewer ", "password": "viewer-password-1"})
-    assert r.json() == {"username": "viewer", "role": "viewer", "name": None, "is_super": False}
+    assert r.json() == {"username": "viewer", "role": "viewer", "name": None, "is_super": False, "scans_enabled": True, "viewing_as": None}
     assert c.get("/api/auth/me").status_code == 200
     c.post("/api/auth/logout")
     assert c.get("/api/auth/me").status_code == 401
