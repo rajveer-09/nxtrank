@@ -3,16 +3,17 @@
 # Date: 18 October 2026
 """Topic tags for contest questions.
 
-LeetCode publishes official topic tags 1-4 weeks after a contest. Until then, the
-topics that community solutions use stand in as **provisional** tags. Each question
-uses exactly one source at a time, official first, so a question never counts twice:
+LeetCode publishes official topic tags 1-4 weeks after a contest. Only those are
+used: until they arrive a question has no tags ("pending") and is left out of topic
+stats. (Provisional tags from the topics community solutions use can be switched back
+on with PROVISIONAL; each question then uses exactly one source, official first.)
 
-| state        | tags used                                   |
-|--------------|---------------------------------------------|
-| official     | LeetCode's official tags                    |
-| provisional  | community topics that pass PROVISIONAL rule |
-| insufficient | none: too little community data yet         |
-| pending      | none: not checked yet                       |
+| state        | tags used                                                  |
+|--------------|------------------------------------------------------------|
+| official     | LeetCode's official tags                                   |
+| pending      | none: not checked yet, or LeetCode hasn't published tags   |
+| provisional  | community topics that pass the rule (only with PROVISIONAL) |
+| insufficient | none: too little community data (only with PROVISIONAL)    |
 
 Raw tags are stored per source (question_tag_sources); the effective ones
 (question_tags) are derived here and rewritten only when they change, which bumps
@@ -32,7 +33,12 @@ from app.leetcode.client import LeetCodeError
 
 log = logging.getLogger(__name__)
 
-# ---- the provisional rule (also shown in the rule book) ------------------------------
+# Provisional tags from community solutions: off, so the dashboard shows LeetCode's
+# official tags only. When on, the rule below picks them (and the refresh asks
+# LeetCode for community topics while a question has no official tags).
+PROVISIONAL = False
+
+# ---- the provisional rule ------------------------------------------------------------
 MIN_MENTIONS = 2  # a topic needs at least this many community solutions...
 TOP_SHARE = 0.30  # ...and at least this share of the most-used topic's count
 MAX_TAGS = 4  # at most this many provisional tags per question
@@ -111,6 +117,8 @@ def _derive(session: Session, slug: str, status: QuestionTagStatus, allowed: set
     official = [(r.tag_slug, r.tag_name) for r in raw if r.source == "official"]
     if official:
         return "official", official, "official"
+    if not PROVISIONAL:  # official tags only: wait for them
+        return "pending", [], None
     if status.community_fetched_at is None:
         return "pending", [], None
     community = [(r.tag_slug, r.tag_name, r.mentions or 0) for r in raw if r.source == "community"]
@@ -121,7 +129,8 @@ def _derive(session: Session, slug: str, status: QuestionTagStatus, allowed: set
 async def refresh(session: Session, client, slugs: list[str], *, official_only: bool = False,
                   now: datetime | None = None) -> RefreshSummary:
     """Fetch tags for these questions and update the effective tags where they changed.
-    Community topics are asked for only while a question has no official tags. A
+    Community topics are asked for only with PROVISIONAL, while a question has no
+    official tags. Stored provisional tags go once PROVISIONAL is off. A
     LeetCode error leaves that question's stored tags as they were. Commits."""
     now = now or utcnow()
     summary = RefreshSummary()
@@ -139,7 +148,7 @@ async def refresh(session: Session, client, slugs: list[str], *, official_only: 
         _replace_source(session, slug, "official", official, now)
         status.official_fetched_at, status.official_found = now, bool(official)
         allowed |= {t for t, _ in official}
-        if not official and not official_only:
+        if not official and not official_only and PROVISIONAL:
             try:
                 community = await client.community_topics(slug)
             except LeetCodeError as e:
