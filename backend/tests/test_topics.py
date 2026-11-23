@@ -8,9 +8,10 @@ import asyncio
 from collections import defaultdict
 from datetime import timedelta
 
+import pytest
 from sqlalchemy import select
 
-from app.db.models import AppState, Contest, ProblemResult, QuestionTag, Result, Student
+from app.db.models import AppState, Contest, ProblemResult, QuestionTag, QuestionTagStatus, Result, Student
 from app.leetcode.client import LeetCodeError
 from app.services import summaries, tags, topics
 from app.worker import Worker
@@ -50,6 +51,13 @@ def refresh(factory, client, slugs=None, **kw):
 def version(factory):
     with factory() as s:
         return summaries.data_version(s)
+
+
+@pytest.fixture(autouse=True)
+def provisional_on(monkeypatch, request):
+    """These tests cover the provisional machinery, switched off in production
+    (tags.PROVISIONAL); test_official_only covers the switched-off behaviour."""
+    monkeypatch.setattr(tags, "PROVISIONAL", "official_only" not in request.node.name)
 
 
 # ---- the provisional rule -------------------------------------------------------------
@@ -104,6 +112,27 @@ def test_no_change_no_version_bump_and_official_replaces_provisional(env):
     with factory() as db:
         assert db.execute(select(QuestionTag.tag_slug, QuestionTag.source)
                           .where(QuestionTag.question_slug == q2)).all() == [("math", "official")]
+
+
+def test_official_only(env):
+    """PROVISIONAL off: no community topics are asked for, and stored provisional tags
+    are dropped on the next refresh (the question waits for official tags)."""
+    _, factory = env
+    q1, q2, *_ = questions(factory)
+    community = {q2: [("math", "Math", 8), ("array", "Array", 3)]}
+    tags.PROVISIONAL = True  # stored provisional tags from before the switch
+    refresh(factory, TagClient(community=community))
+    with factory() as db:
+        assert db.get(QuestionTagStatus, q2).state == "provisional"
+    tags.PROVISIONAL = False
+    client = TagClient(official={q1: [("array", "Array")]}, community=community)
+    summary = refresh(factory, client)
+    assert not [a for a in client.asked if a[0] == "community"]
+    assert summary.provisional_updated == 0 and summary.insufficient == 0
+    with factory() as db:
+        assert db.get(QuestionTagStatus, q1).state == "official"
+        assert db.get(QuestionTagStatus, q2).state == "pending"
+        assert {t.question_slug for t in db.scalars(select(QuestionTag))} == {q1}
 
 
 def test_a_failure_leaves_stored_tags_alone(env):

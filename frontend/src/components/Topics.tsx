@@ -11,34 +11,28 @@ import { RowsSkeleton } from "./skeletons";
 import { TopicBars, TopicDonut } from "./TopicCharts";
 import { Card, CardHeader, Empty, ErrorBox, cx } from "./ui";
 
-/** Topic tags: official ones solid, provisional (from community solutions) dashed. */
-export function TagChip({ name, provisional, title }: { name: string; provisional?: boolean; title?: string }) {
+/** A topic tag (LeetCode's official tags only). */
+export function TagChip({ name, title }: { name: string; title?: string }) {
   return (
-    <span
-      title={title}
-      className={cx(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
-        provisional ? "border border-dashed border-info/50 text-info-ink" : "bg-fg/[0.06] text-ink-2 ring-1 ring-inset ring-fg/[0.08]",
-      )}
-    >
+    <span title={title} className="inline-flex items-center gap-1 rounded-full bg-fg/[0.06] px-2 py-0.5 text-[11px] font-medium text-ink-2 ring-1 ring-inset ring-fg/[0.08]">
       {name}
-      {provisional && <span className="text-[10px] uppercase tracking-wide opacity-80">Provisional</span>}
     </span>
   );
 }
 
-/** A contest question's tags, or why it has none yet. */
+/** A contest question's official tags, or a note that LeetCode hasn't published them yet. */
 export function QuestionChips({ t }: { t: QuestionTopics | undefined }) {
-  if (!t || t.state === "pending") return <span className="text-[11px] text-ink-3">Topics pending</span>;
-  if (t.state === "insufficient") return <span className="text-[11px] text-ink-3">Not enough community data yet</span>;
-  const provisional = t.state === "provisional";
-  const title = provisional
-    ? `From ${t.mentions ?? 0} community solution topic mentions · fetched ${fmtIso(t.fetched_at)} · replaced automatically when LeetCode publishes official tags`
-    : `LeetCode's official tags · checked ${fmtIso(t.fetched_at)}`;
+  if (!t || t.state !== "official" || !t.tags.length)
+    return (
+      <span className="text-[11px] text-ink-3" title="LeetCode publishes official topic tags 1–4 weeks after a contest">
+        Topics pending
+      </span>
+    );
+  const title = `LeetCode's official tags · checked ${fmtIso(t.fetched_at)}`;
   return (
     <span className="inline-flex flex-wrap gap-1">
       {t.tags.map((tag) => (
-        <TagChip key={tag.slug} name={tag.name} provisional={provisional} title={title} />
+        <TagChip key={tag.slug} name={tag.name} title={title} />
       ))}
     </span>
   );
@@ -47,28 +41,19 @@ export function QuestionChips({ t }: { t: QuestionTopics | undefined }) {
 export function TopicLegend() {
   return (
     <p className="text-xs text-ink-3">
-      Solid chips are LeetCode's official tags. <span className="rounded-full border border-dashed border-info/50 px-1.5 text-info-ink">Dashed</span> chips
-      are provisional, from the topics community solutions use, until LeetCode publishes official ones (usually 1–4 weeks after a contest).
+      Topics are LeetCode's official tags, published usually 1–4 weeks after a contest. Until then a question has no topics and isn't counted in topic stats.
     </p>
   );
 }
 
-/** What the topic numbers rest on: how many contests use provisional tags, and what's left out. */
+/** What the topic numbers rest on: which questions are left out until their official tags arrive. */
 export function CoverageNote({ data }: { data: TopicsData }) {
   const c = data.coverage;
   if (!c.questions) return null;
   const parts: string[] = [];
-  if (c.contests_provisional)
-    parts.push(
-      `Topic stats include provisional tags for ${fmtInt(c.contests_provisional)} ${c.contests_provisional === 1 ? "contest" : "contests"} (${fmtInt(c.provisional)} ${c.provisional === 1 ? "question" : "questions"}).`,
-    );
-  const out = c.insufficient + c.pending;
+  const out = c.insufficient + c.pending + c.provisional;
   if (out)
-    parts.push(`${fmtInt(out)} ${out === 1 ? "question isn't" : "questions aren't"} counted yet (${[
-      c.insufficient ? `${c.insufficient} with too little community data` : "",
-      c.pending ? `${c.pending} not checked yet` : "",
-    ].filter(Boolean).join(", ")}).`);
-  if (c.contests_provisional) parts.push("Official tags replace these automatically.");
+    parts.push(`${fmtInt(out)} ${out === 1 ? "question isn't" : "questions aren't"} counted yet: LeetCode hasn't published ${out === 1 ? "its" : "their"} official tags.`);
   if (!parts.length) parts.push(`Every question in these ${fmtInt(c.contests)} contests has official tags.`);
   return (
     <div className="rounded-md bg-info/[0.07] px-3 py-2 text-xs text-ink-2 ring-1 ring-inset ring-info/20">
@@ -105,10 +90,13 @@ export function TopicsTable({ data, weakest = [], groupMedian = false, officialO
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <CoverageNote data={data} />
-        <label className="flex shrink-0 items-center gap-2 text-xs text-ink-2">
-          <input type="checkbox" checked={officialOnly} onChange={(e) => setOfficialOnly(e.target.checked)} className="accent-[var(--accent)]" />
-          Official tags only
-        </label>
+        {/* only while provisional tags are switched on (backend tags.PROVISIONAL) */}
+        {data.coverage.provisional > 0 && (
+          <label className="flex shrink-0 items-center gap-2 text-xs text-ink-2">
+            <input type="checkbox" checked={officialOnly} onChange={(e) => setOfficialOnly(e.target.checked)} className="accent-[var(--accent)]" />
+            Official tags only
+          </label>
+        )}
       </div>
       {rows.length === 0 ? (
         <Empty>{officialOnly ? "No questions here have official tags yet." : "No tagged questions in these contests yet."}</Empty>

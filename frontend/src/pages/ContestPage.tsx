@@ -176,11 +176,7 @@ function QuestionStats({ c }: { c: ContestDetail }) {
     <Card>
       <CardHeader
         title="Questions"
-        subtitle={
-          c.questions.some((q) => q.topics?.state === "provisional")
-            ? "Share of participating students who solved each question. Dashed topic chips are provisional, from community solutions, until LeetCode publishes official tags."
-            : "Share of participating students who solved each question."
-        }
+        subtitle="Share of participating students who solved each question. Topics are LeetCode's official tags, which appear 1–4 weeks after a contest."
       />
       <ul className="divide-y divide-border">
         {c.questions.map((q) => {
