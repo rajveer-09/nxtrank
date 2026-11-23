@@ -107,10 +107,11 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
           ) : (
             <GetResultsButton slug={slug} status={c.status} isAdmin={isAdmin} title={c.title} />
           )}
-          <LinkButton href={api.exportUrl(slug, "xlsx")} download>
+          {/* the page's scope (one college, an instructor's students) applies to the download */}
+          <LinkButton href={api.exportUrl(slug, "xlsx", { scope })} download>
             Download Excel
           </LinkButton>
-          <LinkButton href={api.exportUrl(slug, "csv")} download>
+          <LinkButton href={api.exportUrl(slug, "csv", { scope })} download>
             Download CSV
           </LinkButton>
         </div>
@@ -155,7 +156,13 @@ export default function ContestPage({ isAdmin }: { isAdmin: boolean }) {
             <ErrorBox error={results.error} onRetry={() => results.refetch()} />
           </div>
         ) : (
-          <Leaderboard data={results.data} scoped={scope !== "all"} />
+          <Leaderboard
+            data={results.data}
+            scoped={scope !== "all"}
+            exportHref={(f, format) =>
+              api.exportUrl(slug, format, { ...f, scope: scope.startsWith("college:") ? "all" : scope, college: f.college || (scope.startsWith("college:") ? scope.slice("college:".length) : "") })
+            }
+          />
         )}
       </Card>
       </Later>

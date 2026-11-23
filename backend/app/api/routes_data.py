@@ -28,7 +28,7 @@ from app.services.scans import AUTO, kind_by_age
 from app.services.schedule import round_up
 from app.worker import Policy
 from app.services.scan_status import as_utc
-from app.services.export import result_dict, write_csv_to, xlsx_bytes
+from app.services.export import result_dict, select_results, write_csv_to, xlsx_bytes
 from app.services.results import ContestNotScannedError, load_contest_results
 from app.services.scan_status import queue_status
 
@@ -216,24 +216,47 @@ def contest_results(request: Request, slug: str, college: str | None = None, min
     return conditional(request, db, user, build)
 
 
-@router.get("/contests/{slug}/export.csv")
-def export_csv(slug: str, db: Session = Depends(get_db)) -> Response:
+def _export_rows(request: Request, db: Session, user: User, slug: str, college: str | None, mine: bool,
+                 instructor_id: int | None, q: str, status_filter: str | None):
+    """A contest's results for a download, limited the way the contest page is: its scope
+    (an instructor's students, `mine`) and the leaderboard's filters (college, status,
+    sheet columns as `extra.<Column>=<value>`, search). Returns (stored, rows, filtered,
+    file name without extension)."""
     stored = _results(db, slug)
+    extra = _extra(request)
+    ids = _scope(db, user, None, mine, instructor_id)
+    filtered = ids is not None or bool(college or q.strip() or status_filter or extra)
+    if not filtered:
+        return stored, stored.results, False, slug
+    rows = select_results(stored.results, student_ids=ids, college=college, q=q, status=status_filter, extra=extra)
+    parts = [("mine" if mine else f"instructor-{instructor_id}") if ids is not None else "", college or "",
+             *(extra or {}).values(), status_filter or "", f"search-{q.strip()}" if q.strip() else ""]
+    name = "-".join(p for p in (re.sub(r"[^a-z0-9]+", "-", p.lower()).strip("-") for p in parts) if p)
+    return stored, rows, True, f"{slug}-{name[:80].strip('-') or 'filtered'}"
+
+
+@router.get("/contests/{slug}/export.csv")
+def export_csv(request: Request, slug: str, college: str | None = None, mine: bool = False,
+               instructor_id: int | None = None, q: str = "", status_filter: str | None = Query(None, alias="status"),
+               db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    stored, rows, filtered, name = _export_rows(request, db, user, slug, college, mine, instructor_id, q, status_filter)
     buf = io.StringIO()
     buf.write("﻿")  # BOM so Excel reads UTF-8 names correctly
-    write_csv_to(buf, slug, stored.results, stored.labels)
+    write_csv_to(buf, slug, rows, stored.labels, selection=filtered)
     return Response(buf.getvalue(), media_type="text/csv; charset=utf-8",
-                    headers={"Content-Disposition": f'attachment; filename="{slug}.csv"'})
+                    headers={"Content-Disposition": f'attachment; filename="{name}.csv"'})
 
 
 @router.get("/contests/{slug}/export.xlsx")
-def export_xlsx(slug: str, db: Session = Depends(get_db)) -> Response:
-    stored = _results(db, slug)
-    data = xlsx_bytes(stored.contest.title, slug, stored.results, stored.labels)
+def export_xlsx(request: Request, slug: str, college: str | None = None, mine: bool = False,
+                instructor_id: int | None = None, q: str = "", status_filter: str | None = Query(None, alias="status"),
+                db: Session = Depends(get_db), user: User = Depends(current_user)) -> Response:
+    stored, rows, filtered, name = _export_rows(request, db, user, slug, college, mine, instructor_id, q, status_filter)
+    data = xlsx_bytes(stored.contest.title, slug, rows, stored.labels, selection=filtered)
     return Response(
         data,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{slug}.xlsx"'},
+        headers={"Content-Disposition": f'attachment; filename="{name}.xlsx"'},
     )
 
 
