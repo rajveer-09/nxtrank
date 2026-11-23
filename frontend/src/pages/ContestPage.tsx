@@ -176,7 +176,7 @@ function QuestionStats({ c }: { c: ContestDetail }) {
     <Card>
       <CardHeader
         title="Questions"
-        subtitle="Share of participating students who solved each question. Topics are LeetCode's official tags, which appear 1–4 weeks after a contest."
+        subtitle="Share of participating students who solved each question."
       />
       <ul className="divide-y divide-border">
         {c.questions.map((q) => {
