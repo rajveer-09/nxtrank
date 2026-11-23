@@ -135,6 +135,61 @@ def test_exports(env):
     assert "'=HYPERLINK(\"evil\")" in names
 
 
+def _sheet(content: bytes) -> tuple[list[str], list[dict]]:
+    ws = load_workbook(io.BytesIO(content)).active
+    header = [cell.value for cell in ws[1]]
+    return header, [dict(zip(header, (c.value for c in row))) for row in ws.iter_rows(min_row=2)]
+
+
+def test_filtered_exports(env):
+    c = client_for(env, "viewer")
+    # no filter: everyone, no selection rank
+    header, rows = _sheet(c.get(f"/api/contests/{SLUG}/export.xlsx").content)
+    assert len(rows) == 4 and "rank_in_selection" not in header
+
+    r = c.get(f"/api/contests/{SLUG}/export.xlsx", params={"college": "College B"})
+    assert r.headers["content-disposition"] == f'attachment; filename="{SLUG}-college-b.xlsx"'
+    header, rows = _sheet(r.content)
+    assert {row["roll_no"] for row in rows} == {"R3", "R4"}
+    assert header.index("rank_in_selection") == header.index("global_rank") + 1
+    ranked = [row for row in rows if row["college_rank"]]
+    assert [row["rank_in_selection"] for row in ranked] == list(range(1, len(ranked) + 1))
+
+    # sheet columns, status and search combine; the leaderboard's rules
+    header, rows = _sheet(c.get(f"/api/contests/{SLUG}/export.xlsx",
+                                params={"extra.Batch": "2026", "status": "participated"}).content)
+    assert [row["roll_no"] for row in rows] == ["R1", "R2"]
+    assert [row["rank_in_selection"] for row in rows] == [1, 2]
+    header, rows = _sheet(c.get(f"/api/contests/{SLUG}/export.xlsx", params={"q": "ghost"}).content)
+    assert [row["roll_no"] for row in rows] == ["R4"] and rows[0]["rank_in_selection"] is None
+
+    r = c.get(f"/api/contests/{SLUG}/export.csv", params={"extra.Batch": "2027"})
+    assert r.headers["content-disposition"] == f'attachment; filename="{SLUG}-2027.csv"'
+    lines = r.content.decode("utf-8-sig").strip().splitlines()
+    assert len(lines) == 3 and "rank_in_selection" in lines[0]
+    assert c.get(f"/api/contests/{SLUG}/export.xlsx", params={"mine": "true"}).status_code == 400
+
+
+def test_group_report(env):
+    assert client_for(env, "viewer").get("/api/admin/groups/report").status_code == 403
+    c = client_for(env, "admin")
+    data = c.get("/api/admin/groups/report", params={"key": "Batch", "value": "2026"}).json()
+    assert data["key"] == "Batch" and data["value"] == "2026"
+    assert {"key": "Batch", "values": ["2026", "2027"]} in data["options"]
+    assert [ct["slug"] for ct in data["contests"]] == [SLUG]
+    contest = data["contests"][0]
+    assert contest["students"] == 2 and contest["participated"] == 2
+    assert [t["name"] for t in contest["top"]] == ["Top Ranker", "Penalty Case"]
+    students = data["students"]
+    assert [s["roll_no"] for s in students] == ["R1", "R2"]
+    assert [s["rank"] for s in students] == [1, 2]
+    assert [s["results"][SLUG]["rank"] for s in students] == [1, 2]
+    assert students[1]["results"][SLUG]["global_rank"] == 976
+    # nobody in the group: an empty report, not an error
+    empty = c.get("/api/admin/groups/report").json()
+    assert empty["value"] == "Top K" and empty["students"] == [] and empty["contests"][0]["students"] == 0
+
+
 def test_students(env):
     c = client_for(env, "viewer")
     students = c.get("/api/students").json()["rows"]

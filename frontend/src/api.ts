@@ -70,6 +70,16 @@ function scopeQuery(scope: ContestScope) {
 
 // ---- types -------------------------------------------------------------------
 
+/** What a contest download is limited to (see api.exportUrl). */
+export interface ExportFilters {
+  scope?: ContestScope;
+  college?: string;
+  /** "participated", "flagged" or a result status */
+  status?: string;
+  q?: string;
+  extra?: Record<string, string>;
+}
+
 export type Role = "admin" | "instructor" | "viewer";
 export interface Me {
   username: string;
@@ -488,7 +498,17 @@ export const api = {
     request<ContestDetail>(`/api/contests/${encodeURIComponent(slug)}${scopeQuery(scope)}`),
   results: (slug: string, scope: ContestScope = "all") =>
     request<ContestResults>(`/api/contests/${encodeURIComponent(slug)}/results${scopeQuery(scope)}`),
-  exportUrl: (slug: string, format: "csv" | "xlsx") => `/api/contests/${encodeURIComponent(slug)}/export.${format}`,
+  /** A download of the contest's results: everything, or only the students the page's
+   *  scope and the leaderboard's filters show (the file then ranks them among themselves). */
+  exportUrl: (slug: string, format: "csv" | "xlsx", f: ExportFilters = {}) => {
+    const p = new URLSearchParams(scopeQuery(f.scope ?? "all").slice(1));
+    if (f.college) p.set("college", f.college);
+    if (f.status) p.set("status", f.status);
+    if (f.q?.trim()) p.set("q", f.q.trim());
+    for (const [k, v] of Object.entries(f.extra ?? {})) if (v) p.set(`extra.${k}`, v);
+    const qs = p.toString();
+    return `/api/contests/${encodeURIComponent(slug)}/export.${format}${qs ? `?${qs}` : ""}`;
+  },
 
   students: (f: StudentListQuery) => {
     const p = new URLSearchParams({ sort: f.sort, limit: String(f.limit) });
@@ -987,3 +1007,68 @@ export interface UploadPreview extends ImportSummary {
   records: PreviewRecord[];
   new_colleges?: string[];
 }
+
+// ---- groups (Admin → Top K) ---------------------------------------------------
+
+export interface GroupResult {
+  status: ResultStatus;
+  /** place among the group's students who took part; null if they didn't */
+  rank: number | null;
+  solved: number | null;
+  global_rank: number | null;
+  college_rank: number | null;
+  score: number | null;
+  total_time_secs: number | null;
+}
+
+export interface GroupStudent {
+  id: number;
+  name: string;
+  roll_no: string;
+  college: string;
+  extra: Record<string, string>;
+  handle: string;
+  /** overall place in the group (most contest points); null with no points */
+  rank: number | null;
+  points: number;
+  total_time_secs: number;
+  attended: number;
+  avg_solved: number | null;
+  best_global_rank: number | null;
+  best_group_rank: number | null;
+  avg_group_rank: number | null;
+  results: Record<string, GroupResult>;
+}
+
+export interface GroupContest {
+  slug: string;
+  title: string;
+  start_time: number;
+  questions: number;
+  students: number;
+  participated: number;
+  participation_rate: number | null;
+  avg_solved: number | null;
+  solved_all: number;
+  best_global_rank: number | null;
+  top: { id: number; name: string; solved: number | null; global_rank: number | null; college_rank: number | null }[];
+}
+
+export interface GroupReport {
+  key: string;
+  value: string;
+  last: number | null;
+  options: { key: string; values: string[] }[];
+  /** newest first */
+  contests: GroupContest[];
+  /** best first */
+  students: GroupStudent[];
+}
+
+export const groupsApi = {
+  report: (f: { key: string; value: string; last?: number | null }) => {
+    const p = new URLSearchParams({ key: f.key, value: f.value });
+    if (f.last) p.set("last", String(f.last));
+    return request<GroupReport>(`/api/admin/groups/report?${p}`);
+  },
+};

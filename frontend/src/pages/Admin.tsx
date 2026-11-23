@@ -9,6 +9,7 @@ import { Link, NavLink, Navigate, Route, Routes, useLocation } from "react-route
 import { adminsApi, api, collegesApi, instructorsApi, rosterApi } from "../api";
 import AdminsCard from "../components/Admins";
 import CollegesCard from "../components/Colleges";
+import GroupReportCard from "../components/GroupReport";
 import { Badge, Button, Card, CardHeader, Empty, ErrorBox, Input, cx } from "../components/ui";
 import { fmtIso, fmtInt } from "../format";
 import { CancelScanButton, ScanConfirm, ScansOffNote } from "../components/ContestStatus";
@@ -38,7 +39,7 @@ export default function Admin() {
     <div className="flex flex-col gap-6">
       <div>
         <h1 className="text-xl font-semibold tracking-tight text-ink">Admin</h1>
-        <p className="mt-1 text-[13px] text-ink-2">Manage students and instructors, and run scans on demand.</p>
+        <p className="mt-1 text-[13px] text-ink-2">Manage students and instructors, run scans on demand, and follow the Top K group.</p>
       </div>
       <div className="grid items-start gap-6 lg:grid-cols-[256px_minmax(0,1fr)]">
         <AdminNav />
@@ -52,6 +53,7 @@ export default function Admin() {
             <Route path="colleges" element={<CollegesCard />} />
             <Route path="scans" element={<ScanCard />} />
             <Route path="topics" element={<TagsCard />} />
+            <Route path="top-k" element={<GroupReportCard />} />
             <Route path="*" element={<Navigate to="/admin/students" replace />} />
           </Routes>
         </div>
@@ -75,6 +77,9 @@ const ICONS: Record<string, ReactNode> = {
   ),
   topics: (
     <path d="M2.5 3.5h5l6 6-4 4-6-6v-4ZM5.25 6.25h.01" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+  ),
+  "top-k": (
+    <path d="M5 2.5h6v3.25a3 3 0 0 1-6 0V2.5ZM5 3.75H3v1a2 2 0 0 0 2 2M11 3.75h2v1a2 2 0 0 1-2 2M8 8.75v2.5M5.5 13.5h5M6.25 13.5l.5-2.25h2.5l.5 2.25" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
   ),
   scans: (
     <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9M2.5 2.5v2.6h2.6M8 5v3l2 1.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
@@ -122,6 +127,7 @@ function AdminNav() {
           ) : undefined,
         },
         { to: "topics", label: "Topics", hint: "Question tags, nightly refresh" },
+        { to: "top-k", label: "Top K students", hint: "Contest-wise, ranked among themselves" },
       ],
     },
   ];
