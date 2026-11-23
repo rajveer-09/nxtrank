@@ -103,13 +103,13 @@ function rulesFrom(r: Rules): Rule[] {
     },
     {
       id: "rules-topics", icon: "tag", title: "Topic stats",
-      lead: <>Topics are LeetCode's <b>official</b> tags only. LeetCode publishes them usually 1–4 weeks after a contest; until then a question has no topics and is left out of topic stats.</>,
-      formula: <>Topic stats count only questions with official tags</>,
+      lead: <>Each question is counted under its topics, once. A question whose topics aren't known yet is left out of topic stats until they are.</>,
+      formula: <>Topic stats count questions with known topics</>,
       notes: [
-        <>The worker checks for new official tags nightly (questions from the last {t.recent_days} days) and after every scan.</>,
+        <>The worker refreshes topics nightly (questions from the last {t.recent_days} days) and after every scan; they can be refined over the first weeks after a contest.</>,
         <><b>Appeared</b> = tagged questions in contests attended · <b>solve rate</b> = solved ÷ appeared · <b>accuracy</b> = accepted ÷ (accepted + wrong submissions).</>,
         <><b>Weakest topics</b>: the lowest solve rates among topics seen at least {t.weak_min_appeared} times. Group median times are to the minute.</>,
-        <>When official tags arrive, every topic stat is recounted, with no rescan.</>,
+        <>When a question's topics change, every topic stat is recounted, with no rescan.</>,
       ],
     },
     {

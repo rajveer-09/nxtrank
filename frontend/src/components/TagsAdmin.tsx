@@ -10,12 +10,15 @@ import { useMe } from "../auth";
 import { fmtInt, fmtIso } from "../format";
 import { ScansOffNote } from "./ContestStatus";
 import { RowsSkeleton } from "./skeletons";
-import { QuestionChips, TopicLegend } from "./Topics";
+import { QuestionChips } from "./Topics";
 import { Button, Card, CardHeader, Empty, ErrorBox, Select, cx } from "./ui";
 
-const STATES: { key: TagState; label: string; hint: string }[] = [
-  { key: "official", label: "Official", hint: "LeetCode's own tags" },
-  { key: "pending", label: "Pending", hint: "waiting for LeetCode's official tags" },
+/** Shown as two groups only: a question has topics, or it doesn't yet. */
+type Group = "tagged" | "pending";
+const groupOf = (s: TagState): Group => (s === "official" || s === "provisional" ? "tagged" : "pending");
+const STATES: { key: Group; label: string; hint: string }[] = [
+  { key: "tagged", label: "Tagged", hint: "topics known" },
+  { key: "pending", label: "Pending", hint: "topics not known yet" },
 ];
 
 /** Admin → Topics: the nightly tag refresh, and each question's tags. */
@@ -28,13 +31,13 @@ export default function TagsCard() {
     refetchInterval: (q) => (q.state.data?.refresh_requested ? 10_000 : false),
   });
   const refresh = useMutation({ mutationFn: topicsApi.refresh, onSuccess: () => qc.invalidateQueries({ queryKey: ["tags-status"] }) });
-  const [show, setShow] = useState<TagState | "">("");
+  const [show, setShow] = useState<Group | "">("");
 
   return (
     <Card>
       <CardHeader
         title="Topics"
-        subtitle="The worker refreshes topic tags every night at 00:00 IST for the last 45 days' questions, official tags for every question on the 1st of each month, and right after each scan."
+        subtitle="The worker refreshes topic tags every night at 00:00 IST for the last 45 days' questions, every question on the 1st of each month, and right after each scan."
       />
       <div className="flex flex-col gap-4 border-t border-fg/5 px-5 py-4">
         {status.isPending ? (
@@ -75,7 +78,9 @@ export default function TagsCard() {
                     show === s.key ? "bg-accent-soft ring-accent/30" : "bg-fg/[0.025] ring-fg/[0.06] hover:bg-fg/[0.04]",
                   )}
                 >
-                  <div className="tabular text-lg font-semibold text-ink">{fmtInt(status.data.counts[s.key])}</div>
+                  <div className="tabular text-lg font-semibold text-ink">
+                    {fmtInt((Object.keys(status.data.counts) as TagState[]).filter((k) => groupOf(k) === s.key).reduce((n, k) => n + status.data.counts[k], 0))}
+                  </div>
                   <div className="text-xs text-ink-2">
                     {s.label} · {s.hint}
                   </div>
@@ -86,7 +91,6 @@ export default function TagsCard() {
               <CoverageChart questions={status.data.questions} />
               <TopTopicsChart questions={status.data.questions} />
             </div>
-            <TopicLegend />
           </>
         )}
       </div>
@@ -101,15 +105,15 @@ function QuestionList({
   setShow,
 }: {
   questions: TagsStatus["questions"];
-  show: TagState | "";
-  setShow: (s: TagState | "") => void;
+  show: Group | "";
+  setShow: (s: Group | "") => void;
 }) {
   const [limit, setLimit] = useState(40);
-  const rows = questions.filter((q) => !show || q.state === show);
+  const rows = questions.filter((q) => !show || groupOf(q.state) === show);
   return (
     <div className="border-t border-fg/5">
       <div className="flex items-center gap-3 px-5 py-2">
-        <Select label="Show" hideLabel value={show} onChange={(e) => setShow(e.target.value as TagState | "")}>
+        <Select label="Show" hideLabel value={show} onChange={(e) => setShow(e.target.value as Group | "")}>
           <option value="">Every question</option>
           {STATES.map((s) => (
             <option key={s.key} value={s.key}>
@@ -151,25 +155,15 @@ function QuestionList({
 }
 
 // tag states are states, so they wear the status colours, always with a label
-const STATE_COLOR: Record<TagState, string> = {
-  official: "var(--good)",
-  provisional: "var(--info)",
-  insufficient: "var(--warning)",
-  pending: "var(--neutral)",
-};
-const STATE_LABEL: Record<TagState, string> = {
-  official: "Official",
-  provisional: "Provisional",
-  insufficient: "Not enough data",
-  pending: "Pending",
-};
-const ORDER: TagState[] = ["official", "pending"];
+const STATE_COLOR: Record<Group, string> = { tagged: "var(--good)", pending: "var(--neutral)" };
+const STATE_LABEL: Record<Group, string> = { tagged: "Tagged", pending: "Pending" };
+const ORDER: Group[] = ["tagged", "pending"];
 const RECENT_CONTESTS = 12;
 
 const shortName = (title: string) => title.replace(/^Weekly Contest /, "W").replace(/^Biweekly Contest /, "B");
 
-/** Recent contests, oldest to newest: each question coloured by its tag state. Official
- *  tags arriving over the weeks show as the green moving right. */
+/** Recent contests, oldest to newest: each question coloured by whether its topics are
+ *  known. Topics arriving over the days show as the green moving right. */
 function CoverageChart({ questions }: { questions: TagsStatus["questions"] }) {
   const [active, setActive] = useState<string | null>(null);
   const contests: { slug: string; title: string; qs: TagsStatus["questions"] }[] = [];
@@ -197,7 +191,7 @@ function CoverageChart({ questions }: { questions: TagsStatus["questions"] }) {
       </figcaption>
       <div
         role="img"
-        aria-label={`Tag coverage by contest: ${shown.map((c) => `${c.title}: ${ORDER.map((s) => `${c.qs.filter((q) => q.state === s).length} ${STATE_LABEL[s].toLowerCase()}`).join(", ")}`).join("; ")}`}
+        aria-label={`Tag coverage by contest: ${shown.map((c) => `${c.title}: ${ORDER.map((s) => `${c.qs.filter((q) => groupOf(q.state) === s).length} ${STATE_LABEL[s].toLowerCase()}`).join(", ")}`).join("; ")}`}
         className="relative"
       >
         <div aria-hidden className="flex h-36 items-end gap-1.5">
@@ -213,8 +207,8 @@ function CoverageChart({ questions }: { questions: TagsStatus["questions"] }) {
               onClick={() => setActive(active === c.slug ? null : c.slug)}
             >
               <div className="flex flex-col-reverse gap-0.5" style={{ height: `${(c.qs.length / tallest) * 100}%` }}>
-                {ORDER.flatMap((s) => c.qs.filter((q) => q.state === s)).map((q) => (
-                  <span key={q.label} className="min-h-1 flex-1 rounded-[3px]" style={{ background: STATE_COLOR[q.state] }} />
+                {ORDER.flatMap((s) => c.qs.filter((q) => groupOf(q.state) === s)).map((q) => (
+                  <span key={q.label} className="min-h-1 flex-1 rounded-[3px]" style={{ background: STATE_COLOR[groupOf(q.state)] }} />
                 ))}
               </div>
             </div>
@@ -235,7 +229,7 @@ function CoverageChart({ questions }: { questions: TagsStatus["questions"] }) {
             <b>{hovered.title}</b>
             {hovered.qs.map((q) => (
               <div key={q.label}>
-                {q.label}: {STATE_LABEL[q.state].toLowerCase()}
+                {q.label}: {STATE_LABEL[groupOf(q.state)].toLowerCase()}
                 {q.tags.length ? ` · ${q.tags.map((t) => t.name).join(", ")}` : ""}
               </div>
             ))}
@@ -246,59 +240,32 @@ function CoverageChart({ questions }: { questions: TagsStatus["questions"] }) {
   );
 }
 
-/** The topics on the most questions, official and provisional parts. */
+/** The topics on the most questions. */
 function TopTopicsChart({ questions }: { questions: TagsStatus["questions"] }) {
-  const counts = new Map<string, { name: string; official: number; provisional: number }>();
+  const counts = new Map<string, { name: string; n: number }>();
   for (const q of questions)
     for (const t of q.tags) {
-      const c = counts.get(t.slug) ?? { name: t.name, official: 0, provisional: 0 };
-      if (t.source === "official") c.official++;
-      else c.provisional++;
+      const c = counts.get(t.slug) ?? { name: t.name, n: 0 };
+      c.n++;
       counts.set(t.slug, c);
     }
-  const rows = [...counts.values()]
-    .sort((a, b) => b.official + b.provisional - (a.official + a.provisional) || a.name.localeCompare(b.name))
-    .slice(0, 8);
+  const rows = [...counts.values()].sort((a, b) => b.n - a.n || a.name.localeCompare(b.name)).slice(0, 8);
   if (!rows.length) return null;
-  const most = rows[0].official + rows[0].provisional;
+  const most = rows[0].n;
   return (
     <figure className="flex min-w-0 flex-col gap-3">
       <figcaption className="flex flex-wrap items-center justify-between gap-2 text-xs">
         <span className="font-medium text-ink">Most common topics</span>
-        <span className="flex gap-3 text-ink-2" aria-hidden>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-[2px] bg-[var(--series-1)]" />
-            Official
-          </span>
-          {rows.some((r) => r.provisional > 0) && (
-            <span className="flex items-center gap-1.5">
-              <span className="h-2 w-2 rounded-[2px] border border-dashed border-[var(--series-1)]" />
-              Provisional
-            </span>
-          )}
-        </span>
       </figcaption>
-      <div role="img" aria-label={`Most common topics: ${rows.map((r) => `${r.name} ${r.official + r.provisional} questions`).join(", ")}`}>
+      <div role="img" aria-label={`Most common topics: ${rows.map((r) => `${r.name} ${r.n} questions`).join(", ")}`}>
         <ul aria-hidden className="flex flex-col gap-1.5">
           {rows.map((r) => (
-            <li
-              key={r.name}
-              title={`${r.name}: ${r.official} official, ${r.provisional} provisional`}
-              className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.5rem] items-center gap-3"
-            >
+            <li key={r.name} title={`${r.name}: ${r.n} questions`} className="grid grid-cols-[minmax(0,7.5rem)_minmax(0,1fr)_2.5rem] items-center gap-3">
               <span className="truncate text-xs text-ink-2">{r.name}</span>
-              <span className="flex h-2.5 gap-0.5">
-                {r.official > 0 && (
-                  <span className="rounded-full bg-[var(--series-1)]" style={{ width: `${(r.official / most) * 100}%` }} />
-                )}
-                {r.provisional > 0 && (
-                  <span
-                    className="rounded-full border border-dashed border-[var(--series-1)] bg-[color-mix(in_srgb,var(--series-1)_18%,transparent)]"
-                    style={{ width: `${(r.provisional / most) * 100}%` }}
-                  />
-                )}
+              <span className="flex h-2.5">
+                <span className="rounded-full bg-[var(--series-1)]" style={{ width: `${(r.n / most) * 100}%` }} />
               </span>
-              <span className="tabular text-right text-xs font-medium text-ink">{r.official + r.provisional}</span>
+              <span className="tabular text-right text-xs font-medium text-ink">{r.n}</span>
             </li>
           ))}
         </ul>
