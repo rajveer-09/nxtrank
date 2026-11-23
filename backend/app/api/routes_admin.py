@@ -19,7 +19,7 @@ from app.api.errors import ApiError
 from app.api.routes_data import scans_allowed
 from app.config import Settings
 from app.db.models import College, ScanRequest, ScanRun, Student, Upload, User, utcnow
-from app.services import drafts, tags, view_as, wake
+from app.services import drafts, groups, tags, view_as, wake
 from app.services.scan_status import set_state
 from app.services.dashboard import iso
 from app.services.instructors import (
@@ -139,6 +139,16 @@ async def upload_students(request: Request, filename: str, preview: bool = False
 @router.get("/students/template.xlsx")
 def student_template() -> Response:
     return _xlsx(students_template(), "students-template.xlsx")
+
+
+@router.get("/groups/report")
+def group_report(request: Request, key: str = groups.DEFAULT_KEY, value: str = groups.DEFAULT_VALUE,
+                 last: int | None = Query(None, ge=1), db: Session = Depends(get_db),
+                 user: User = Depends(current_user)) -> Response:
+    """A group of students (a sheet column's value, e.g. Group = Top K): contest-wise
+    results and ranks among themselves."""
+    return conditional(request, db, user, lambda version: groups.group_report(
+        db, key=key, value=value, last=last, version=version))
 
 
 @router.get("/scan-runs")

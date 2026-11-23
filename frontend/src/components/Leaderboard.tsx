@@ -14,9 +14,9 @@ import {
 } from "@tanstack/react-table";
 import { useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import type { ContestResults, ResultRow, ResultStatus } from "../api";
+import type { ContestResults, ExportFilters, ResultRow, ResultStatus } from "../api";
 import { fmtDuration, fmtInt } from "../format";
-import { Badge, Button, Empty, Input, LeaderboardRank, Medal, ProfileRank, ResultStatusBadge, Select, cx, resultStatusLabel, scrollToTopOf } from "./ui";
+import { Badge, Button, Empty, Input, LeaderboardRank, LinkButton, Medal, ProfileRank, ResultStatusBadge, Select, cx, resultStatusLabel, scrollToTopOf } from "./ui";
 import { Spacer, useReveal, useWindowRows } from "./virtual";
 
 const STATUS_ORDER: ResultStatus[] = ["solved", "zero", "absent", "invalid_handle", "no_handle", "duplicate_handle"];
@@ -40,8 +40,17 @@ function filterableExtras(rows: ResultRow[]): [string, string[]][] {
 }
 
 /** `scoped`: the rows are one college or an instructor's students, so ranks (and medals)
- *  count within them; the portal-wide rank is shown underneath. */
-export default function Leaderboard({ data, scoped = false }: { data: ContestResults; scoped?: boolean }) {
+ *  count within them; the portal-wide rank is shown underneath. `exportHref`: a download
+ *  of the rows the filters show, offered while any filter is on. */
+export default function Leaderboard({
+  data,
+  scoped = false,
+  exportHref,
+}: {
+  data: ContestResults;
+  scoped?: boolean;
+  exportHref?: (f: ExportFilters, format: "xlsx" | "csv") => string;
+}) {
   const { labels, rows } = data;
   const rankInScope = useMemo(() => {
     const ranked = rows.filter((r) => r.college_rank != null).sort((a, b) => a.college_rank! - b.college_rank!);
@@ -270,6 +279,16 @@ export default function Leaderboard({ data, scoped = false }: { data: ContestRes
             </option>
           ))}
         </Select>
+        {anyFilter && exportHref && filtered.length > 0 && (
+          <span className="flex items-center gap-2 sm:ml-auto">
+            <LinkButton href={exportHref({ college, status, q: query, extra: extraFilters }, "xlsx")} download>
+              Download these {fmtInt(filtered.length)} (Excel)
+            </LinkButton>
+            <LinkButton href={exportHref({ college, status, q: query, extra: extraFilters }, "csv")} download>
+              CSV
+            </LinkButton>
+          </span>
+        )}
         {anyFilter && (
           <Button
             variant="ghost"
