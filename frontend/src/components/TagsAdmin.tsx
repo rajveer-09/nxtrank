@@ -15,9 +15,7 @@ import { Button, Card, CardHeader, Empty, ErrorBox, Select, cx } from "./ui";
 
 const STATES: { key: TagState; label: string; hint: string }[] = [
   { key: "official", label: "Official", hint: "LeetCode's own tags" },
-  { key: "provisional", label: "Provisional", hint: "from community solutions" },
-  { key: "insufficient", label: "Not enough data", hint: "left out of topic stats" },
-  { key: "pending", label: "Pending", hint: "not checked yet" },
+  { key: "pending", label: "Pending", hint: "waiting for LeetCode's official tags" },
 ];
 
 /** Admin → Topics: the nightly tag refresh, and each question's tags. */
@@ -165,7 +163,7 @@ const STATE_LABEL: Record<TagState, string> = {
   insufficient: "Not enough data",
   pending: "Pending",
 };
-const ORDER: TagState[] = ["official", "provisional", "insufficient", "pending"];
+const ORDER: TagState[] = ["official", "pending"];
 const RECENT_CONTESTS = 12;
 
 const shortName = (title: string) => title.replace(/^Weekly Contest /, "W").replace(/^Biweekly Contest /, "B");
@@ -272,10 +270,12 @@ function TopTopicsChart({ questions }: { questions: TagsStatus["questions"] }) {
             <span className="h-2 w-2 rounded-[2px] bg-[var(--series-1)]" />
             Official
           </span>
-          <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-[2px] border border-dashed border-[var(--series-1)]" />
-            Provisional
-          </span>
+          {rows.some((r) => r.provisional > 0) && (
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-[2px] border border-dashed border-[var(--series-1)]" />
+              Provisional
+            </span>
+          )}
         </span>
       </figcaption>
       <div role="img" aria-label={`Most common topics: ${rows.map((r) => `${r.name} ${r.official + r.provisional} questions`).join(", ")}`}>
