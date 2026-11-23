@@ -3,17 +3,19 @@
 # Date: 18 October 2026
 """Topic tags for contest questions.
 
-LeetCode publishes official topic tags 1-4 weeks after a contest. Only those are
-used: until they arrive a question has no tags ("pending") and is left out of topic
-stats. (Provisional tags from the topics community solutions use can be switched back
-on with PROVISIONAL; each question then uses exactly one source, official first.)
+LeetCode publishes official topic tags 1-4 weeks after a contest. Until then, the
+topics that community solutions use stand in as **provisional** tags (the dashboard
+shows both the same way). Each question uses exactly one source at a time, official
+first, so a question never counts twice:
 
-| state        | tags used                                                  |
-|--------------|------------------------------------------------------------|
-| official     | LeetCode's official tags                                   |
-| pending      | none: not checked yet, or LeetCode hasn't published tags   |
-| provisional  | community topics that pass the rule (only with PROVISIONAL) |
-| insufficient | none: too little community data (only with PROVISIONAL)    |
+| state        | tags used                                   |
+|--------------|---------------------------------------------|
+| official     | LeetCode's official tags                    |
+| provisional  | community topics that pass PROVISIONAL rule |
+| insufficient | none: too little community data yet         |
+| pending      | none: not checked yet                       |
+
+PROVISIONAL = False switches the community source off (official tags only).
 
 Raw tags are stored per source (question_tag_sources); the effective ones
 (question_tags) are derived here and rewritten only when they change, which bumps
@@ -33,10 +35,10 @@ from app.leetcode.client import LeetCodeError
 
 log = logging.getLogger(__name__)
 
-# Provisional tags from community solutions: off, so the dashboard shows LeetCode's
-# official tags only. When on, the rule below picks them (and the refresh asks
-# LeetCode for community topics while a question has no official tags).
-PROVISIONAL = False
+# Provisional tags from community solutions while a question has no official tags.
+# False: official tags only (the refresh then never asks for community topics, and
+# stored provisional tags are dropped on the next refresh).
+PROVISIONAL = True
 
 # ---- the provisional rule ------------------------------------------------------------
 MIN_MENTIONS = 2  # a topic needs at least this many community solutions...

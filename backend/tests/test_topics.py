@@ -55,8 +55,7 @@ def version(factory):
 
 @pytest.fixture(autouse=True)
 def provisional_on(monkeypatch, request):
-    """These tests cover the provisional machinery, switched off in production
-    (tags.PROVISIONAL); test_official_only covers the switched-off behaviour."""
+    """Provisional tags on (the default); test_official_only covers tags.PROVISIONAL off."""
     monkeypatch.setattr(tags, "PROVISIONAL", "official_only" not in request.node.name)
 
 
