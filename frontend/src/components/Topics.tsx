@@ -4,14 +4,13 @@
  * Date: 18 October 2026
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
 import type { QuestionTopics, TopicMetrics, TopicRow, TopicsData } from "../api";
 import { fmtDuration, fmtInt, fmtIso, fmtPct } from "../format";
 import { RowsSkeleton } from "./skeletons";
 import { TopicBars, TopicDonut } from "./TopicCharts";
 import { Card, CardHeader, Empty, ErrorBox, cx } from "./ui";
 
-/** A topic tag (LeetCode's official tags only). */
+/** A topic tag. */
 export function TagChip({ name, title }: { name: string; title?: string }) {
   return (
     <span title={title} className="inline-flex items-center gap-1 rounded-full bg-fg/[0.06] px-2 py-0.5 text-[11px] font-medium text-ink-2 ring-1 ring-inset ring-fg/[0.08]">
@@ -20,15 +19,15 @@ export function TagChip({ name, title }: { name: string; title?: string }) {
   );
 }
 
-/** A contest question's official tags, or a note that LeetCode hasn't published them yet. */
+/** A contest question's topics, or a note that they aren't known yet. */
 export function QuestionChips({ t }: { t: QuestionTopics | undefined }) {
-  if (!t || t.state !== "official" || !t.tags.length)
+  if (!t || !t.tags.length)
     return (
-      <span className="text-[11px] text-ink-3" title="LeetCode publishes official topic tags 1–4 weeks after a contest">
+      <span className="text-[11px] text-ink-3" title="Topics appear a few days after a contest">
         Topics pending
       </span>
     );
-  const title = `LeetCode's official tags · checked ${fmtIso(t.fetched_at)}`;
+  const title = t.fetched_at ? `Topics · updated ${fmtIso(t.fetched_at)}` : undefined;
   return (
     <span className="inline-flex flex-wrap gap-1">
       {t.tags.map((tag) => (
@@ -38,23 +37,15 @@ export function QuestionChips({ t }: { t: QuestionTopics | undefined }) {
   );
 }
 
-export function TopicLegend() {
-  return (
-    <p className="text-xs text-ink-3">
-      Topics are LeetCode's official tags, published usually 1–4 weeks after a contest. Until then a question has no topics and isn't counted in topic stats.
-    </p>
-  );
-}
-
-/** What the topic numbers rest on: which questions are left out until their official tags arrive. */
+/** What the topic numbers rest on: which questions are left out until their topics are known. */
 export function CoverageNote({ data }: { data: TopicsData }) {
   const c = data.coverage;
   if (!c.questions) return null;
   const parts: string[] = [];
-  const out = c.insufficient + c.pending + c.provisional;
+  const out = c.insufficient + c.pending;
   if (out)
-    parts.push(`${fmtInt(out)} ${out === 1 ? "question isn't" : "questions aren't"} counted yet: LeetCode hasn't published ${out === 1 ? "its" : "their"} official tags.`);
-  if (!parts.length) parts.push(`Every question in these ${fmtInt(c.contests)} contests has official tags.`);
+    parts.push(`${fmtInt(out)} ${out === 1 ? "question isn't" : "questions aren't"} counted yet: ${out === 1 ? "its" : "their"} topics aren't known yet.`);
+  if (!parts.length) parts.push(`Every question in these ${fmtInt(c.contests)} contests has topics.`);
   return (
     <div className="rounded-md bg-info/[0.07] px-3 py-2 text-xs text-ink-2 ring-1 ring-inset ring-info/20">
       {parts.join(" ")}
@@ -63,23 +54,10 @@ export function CoverageNote({ data }: { data: TopicsData }) {
   );
 }
 
-function pick(row: TopicRow, officialOnly: boolean): TopicMetrics {
-  return officialOnly ? row.official : row;
-}
-
 /** The topics table: appeared, solved, solve rate, accuracy and median time per topic. */
-export function TopicsTable({ data, weakest = [], groupMedian = false, officialOnly: controlled, setOfficialOnly: setControlled }: {
-  data: TopicsData;
-  weakest?: string[];
-  groupMedian?: boolean;
-  officialOnly?: boolean;
-  setOfficialOnly?: (v: boolean) => void;
-}) {
-  const [own, setOwn] = useState(false);
-  const officialOnly = controlled ?? own;
-  const setOfficialOnly = setControlled ?? setOwn;
+export function TopicsTable({ data, weakest = [], groupMedian = false }: { data: TopicsData; weakest?: string[]; groupMedian?: boolean }) {
   const rows = data.topics
-    .map((r) => ({ row: r, m: pick(r, officialOnly) }))
+    .map((r): { row: TopicRow; m: TopicMetrics } => ({ row: r, m: r }))
     .filter(({ m }) => m.appeared > 0)
     .sort((a, b) => {
       const wa = weakest.indexOf(a.row.slug), wb = weakest.indexOf(b.row.slug);
@@ -90,16 +68,9 @@ export function TopicsTable({ data, weakest = [], groupMedian = false, officialO
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <CoverageNote data={data} />
-        {/* only while provisional tags are switched on (backend tags.PROVISIONAL) */}
-        {data.coverage.provisional > 0 && (
-          <label className="flex shrink-0 items-center gap-2 text-xs text-ink-2">
-            <input type="checkbox" checked={officialOnly} onChange={(e) => setOfficialOnly(e.target.checked)} className="accent-[var(--accent)]" />
-            Official tags only
-          </label>
-        )}
       </div>
       {rows.length === 0 ? (
-        <Empty>{officialOnly ? "No questions here have official tags yet." : "No tagged questions in these contests yet."}</Empty>
+        <Empty>No tagged questions in these contests yet.</Empty>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-[13px]">
@@ -119,11 +90,6 @@ export function TopicsTable({ data, weakest = [], groupMedian = false, officialO
                   <td className="py-2 pr-3">
                     <span className="font-medium text-ink">{row.name}</span>
                     {weakest.includes(row.slug) && <span className="ml-2 rounded-full bg-critical/10 px-1.5 py-0.5 text-[10px] font-medium text-critical-ink">weak</span>}
-                    {!officialOnly && row.provisional_appeared > 0 && (
-                      <span className="ml-2 text-[11px] text-info-ink" title={`${row.provisional_questions} provisional ${row.provisional_questions === 1 ? "question" : "questions"} count here`}>
-                        ⓟ {fmtInt(row.provisional_appeared)} of {fmtInt(row.appeared)} provisional
-                      </span>
-                    )}
                   </td>
                   <td className="tabular py-2 pr-3 text-right">{fmtInt(m.appeared)}</td>
                   <td className="tabular py-2 pr-3 text-right">{fmtInt(m.solved)}</td>
@@ -136,7 +102,6 @@ export function TopicsTable({ data, weakest = [], groupMedian = false, officialO
           </table>
         </div>
       )}
-      <TopicLegend />
     </div>
   );
 }
@@ -152,9 +117,8 @@ export function TopicsCard({ queryKey, fetch, subtitle, group = false, compare }
 }) {
   const q = useQuery({ queryKey: ["topics", ...queryKey], queryFn: fetch, placeholderData: keepPreviousData });
   const other = useQuery({ queryKey: ["topics", ...(compare?.queryKey ?? ["none"])], queryFn: compare?.fetch ?? (() => Promise.reject()), enabled: !!compare, staleTime: 5 * 60_000 });
-  const [officialOnly, setOfficialOnly] = useState(false);
   const rates = other.data
-    ? new Map(other.data.topics.map((t) => [t.slug, (officialOnly ? t.official : t).solve_rate] as const))
+    ? new Map(other.data.topics.map((t) => [t.slug, t.solve_rate] as const))
     : undefined;
   return (
     <Card>
@@ -168,11 +132,11 @@ export function TopicsCard({ queryKey, fetch, subtitle, group = false, compare }
           <div className="flex flex-col gap-5">
             {q.data.topics.length > 0 && (
               <div className="grid gap-6 lg:grid-cols-[minmax(0,3fr)_minmax(0,2fr)]">
-                <TopicBars rows={q.data.topics} officialOnly={officialOnly} compare={rates} compareLabel={compare?.label} />
-                <TopicDonut rows={q.data.topics} officialOnly={officialOnly} />
+                <TopicBars rows={q.data.topics} officialOnly={false} compare={rates} compareLabel={compare?.label} />
+                <TopicDonut rows={q.data.topics} officialOnly={false} />
               </div>
             )}
-            <TopicsTable data={q.data} weakest={group ? q.data.weakest : []} groupMedian={group} officialOnly={officialOnly} setOfficialOnly={setOfficialOnly} />
+            <TopicsTable data={q.data} weakest={group ? q.data.weakest : []} groupMedian={group} />
           </div>
         )}
       </div>
